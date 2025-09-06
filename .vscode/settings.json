@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "functional": "cpp",
+        "chrono": "cpp",
+        "__locale": "cpp"
+    }
+}

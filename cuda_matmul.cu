@@ -60,8 +60,8 @@ int main() {
     cudaMemcpy(d_A, A, 3 * 2 * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, B, 2 * 2 * sizeof(int), cudaMemcpyHostToDevice);
 
-    dim3 numBlocks          = dim3(1        , 1         , 1);
-    dim3 threadsPerBlock    = dim3(A_rows   , B_cols    , 1);
+    dim3 numBlocks          = dim3(1        ,1         ,1);
+    dim3 threadsPerBlock    = dim3(A_rows   ,B_cols    ,1);
 
     MatMul<<<numBlocks, threadsPerBlock>>>(d_A, d_B, result, A_rows, A_cols, B_cols);
     
