@@ -60,6 +60,7 @@ int main() {
     cudaMemcpy(d_A, A, 3 * 2 * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, B, 2 * 2 * sizeof(int), cudaMemcpyHostToDevice);
 
+    // TODO: add a mechanism to split up matrices into 8x8 submatrix tiles for larger matrices
     dim3 numBlocks          = dim3(1        ,1         ,1);
     dim3 threadsPerBlock    = dim3(A_rows   ,B_cols    ,1);
 
