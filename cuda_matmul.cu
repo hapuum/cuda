@@ -77,5 +77,12 @@ int main() {
         printf("\n");
     }
 
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(result);
+    delete[] A;
+    delete[] B;
+    delete[] resultHost;
+
     return EXIT_SUCCESS;
 }

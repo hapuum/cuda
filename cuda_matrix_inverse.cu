@@ -111,5 +111,10 @@ int main() {
         printf("\n");
     }
 
+    cudaFree(d_A);
+    cudaFree(d_B);
+    cudaFree(d_AB);
+    delete[] h_solution;
+    
     return EXIT_SUCCESS;
 }
