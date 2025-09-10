@@ -93,7 +93,7 @@ typedef struct {
     hsr_relic_t relics[6];
 } hsr_character_t;
 
-void scan_json(const char* json_content, size_t length, 
+void scan_json(const char* json_content, size_t file_size, 
                             size_t* openBracePositions, 
                             size_t* closeBracePositions,
                             size_t* openBracketPositions,
@@ -101,7 +101,22 @@ void scan_json(const char* json_content, size_t length,
                             size_t* colonPositions,
                             size_t* commaPositions) {
     
-    // determine block size:
+    
+    
+    
+                                // determine block size:
+
+
+    const int thread_scan_length = 4096; // standard length of page
+    const int thread_per_block = 256; // each block processes 1 MiB
+
+
+
+
+    int num_block = (file_size + thread_per_block * thread_scan_length) / (thread_per_block * thread_scan_length);
+    // launch kernel with: <<<num_block, threads_per_block>>>
+
+    
 
     // determine appropriate size for {} [] , :
     // set max for how much of each symbol can be parsed per thread, then launch __shared__
@@ -110,6 +125,61 @@ void scan_json(const char* json_content, size_t length,
     // in a sense its a 0-terminated 2D list, of vec<vec<size_t>> that we are trying to have in here.
     // if a thread parses more than max_symbol_per_thread, record to some another flag and print out
     // so this limit can be increased.
+
+
+    // MAYBE ACTUALLY JUST NEED TO IMPLEMENT CUSTOM VECTOR CLASS????
+    // this kinda doesnt work
+
+    /* Kernel code -- to be modified later. 
+
+    const int MAX_SYMBOL_PER_THREAD = 100;
+    size_t size_per_thread = sizeof(int) * MAX_SYMBOL_PER_THREAD;
+    const size_t thread_scan_length = length / blockDim.x;
+
+    __shared__ size_t* openBraceIndex;
+    __shared__ size_t* closeBraceIndex;
+    __shared__ size_t* openBracketIndex;
+    __shared__ size_t* closeBracketIndex;
+    __shared__ size_t* colonIndex;
+    __shared__ size_t* commaIndex;
+    // these should be allocated as array of length (max_symbol_per_thread * thread)
+    
+
+
+
+    int count = 0;
+    int index = 0;
+
+    while (count < MAX_SYMBOL_PER_THREAD && index < thread_scan_length) {
+        char c = json_content[index + threadIdx.x * thread_scan_length];
+        printf(c);
+        switch (c) {
+            case '{':
+                
+            case '}':
+
+            case '[':
+
+            case ']':
+
+            case ':':
+
+            case ',':
+
+            
+        }
+    }
+
+    // NOW REDUCE THIS ARRAY BASED ON FIRST VALUE AND LAST VALUE
+
+    */
+
+
+
+
+    
+
+
 
     // launch kernel, which collects intermediate data for the thread block
 
