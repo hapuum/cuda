@@ -8,16 +8,17 @@
 // 3. Parellel generate HSR Relic data to HSR Sim data
 
 // includes and defines
-#pragma once
 #include <iostream>
 #include <fstream>
 #include <string>
 #include "cuda_hsr_sim.h"
 
 #define FILEPATH "/home/hapuum/cuda_learn/resource/relic_data.json"
-#define CHAR_PER_THREAD 4096    // 1 full memory page
-#define NUM_PER_BLOCK 256       // makes 1 block = 1MiB
-
+#define TEST_FILEPATH "/home/hapuum/cuda_learn/resource/test.json"
+#define CHAR_PER_THREAD 4096        // 1 full memory page
+#define NUM_PER_BLOCK 256           // makes 1 block = 1MiB
+#define T0_DEFAULT_MAX_SIZE 32768  // default size of DeviceVector at thread 0 vs rest.
+#define REST_DEFAULT_MAX_SIZE 64  // thread 0 is reserved more space for reduction stage
 
 template<typename T>
 class
@@ -30,8 +31,13 @@ DeviceVector
         {
             data = new T[capacity];
         }
+        __device__ DeviceVector(size_t c) : data(nullptr), capacity(c), length(0) 
+        {
+            data = new T[capacity];
+        }
 
         __device__ ~DeviceVector() { delete[] data; }
+
         __device__ void push_back(const T& value) 
         {
             if (length >= capacity) 
@@ -47,6 +53,19 @@ DeviceVector
         }
         __device__ T& operator[](size_t idx) { return data[idx]; }
         __device__ size_t size() const { return length; }
+        __device__ void set(size_t idx, const T& value) { data[idx] = value; }
+        __device__ T& get(size_t idx) { return data[idx]; }
+
+        __device__ void join(DeviceVector<T>* next) 
+        {
+            for (int i = 0; i < next->length; i++) {
+                this->push_back(next->get(i));
+            }
+        }
+
+        __device__ T* getInternalArray() {
+            return data;
+        }
 };
 
 __global__
@@ -57,34 +76,36 @@ build_structural_index
     char* file_data, 
     size_t file_size,
     // output 
-    size_t* open_brace_positions,
-    size_t* close_brace_positions,
-    size_t* open_bracket_positions,
-    size_t* close_bracket_positions,
-    size_t* colon_positions,
-    size_t* comma_positions
+    int* open_brace_positions,
+    int* close_brace_positions,
+    int* open_bracket_positions,
+    int* close_bracket_positions,
+    int* colon_positions,
+    int* comma_positions
 ) 
 {
     // save index from last occurrence in a matrix, each row = each thread, index 0~5 in this order
     // later used for joining the vectors.
-    __shared__ int a[blockDim.x][6]; 
+    __shared__ int last_occurrence[NUM_PER_BLOCK][6]; 
 
-    int open_brace_last_occurrence;
-    int close_brace_last_occurrence;
-    int open_bracket_last_occurrence;
-    int close_bracket_last_occurrence;
-    int colon_last_occurrence;
-    int comma_last_occurrence;
+    int open_brace_last_occurrence = 0;
+    int close_brace_last_occurrence = 0;
+    int open_bracket_last_occurrence = 0;
+    int close_bracket_last_occurrence = 0;
+    int colon_last_occurrence = 0;
+    int comma_last_occurrence = 0;
 
-    DeviceVector<int>* open_brace_vector = new DeviceVector<int>();
-    DeviceVector<int>* close_brace_vector = new DeviceVector<int>();
-    DeviceVector<int>* open_bracket_vector = new DeviceVector<int>();
-    DeviceVector<int>* close_bracket_vector = new DeviceVector<int>();
-    DeviceVector<int>* colon_vector = new DeviceVector<int>();
-    DeviceVector<int>* comma_vector = new DeviceVector<int>();
+    size_t vector_capacity = (threadIdx.x == 0) ? T0_DEFAULT_MAX_SIZE : REST_DEFAULT_MAX_SIZE;
+
+    DeviceVector<int>* open_brace_vector = new DeviceVector<int>(vector_capacity);
+    DeviceVector<int>* close_brace_vector = new DeviceVector<int>(vector_capacity);
+    DeviceVector<int>* open_bracket_vector = new DeviceVector<int>(vector_capacity);
+    DeviceVector<int>* close_bracket_vector = new DeviceVector<int>(vector_capacity);
+    DeviceVector<int>* colon_vector = new DeviceVector<int>(vector_capacity);
+    DeviceVector<int>* comma_vector = new DeviceVector<int>(vector_capacity);
 
     // iterate through each character of assigned section of file_data
-    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
     for (int i = 0; i < CHAR_PER_THREAD; i++) {
         // update occurrence counter
         open_brace_last_occurrence++;
@@ -94,151 +115,111 @@ build_structural_index
         colon_last_occurrence++;
         comma_last_occurrence++;
 
-        char c = file_data[tid * CHAR_PER_THREAD + i];
+        char c = file_data[idx * CHAR_PER_THREAD + i];
         switch (c) {
             case '{':
                 open_brace_vector->push_back(open_brace_last_occurrence);
                 open_brace_last_occurrence = 0;
+                break;
             case '}':
                 close_brace_vector->push_back(close_brace_last_occurrence);
                 close_brace_last_occurrence = 0;
+                break;
             case '[':
                 open_bracket_vector->push_back(open_bracket_last_occurrence);
                 open_bracket_last_occurrence = 0;
+                break;
             case ']':
                 close_bracket_vector->push_back(close_bracket_last_occurrence);
                 close_bracket_last_occurrence = 0;
+                break;
             case ':':
                 colon_vector->push_back(open_brace_last_occurrence);
                 colon_last_occurrence = 0;
+                break;
             case ',':
                 comma_vector->push_back(open_brace_last_occurrence);
                 comma_last_occurrence = 0;
+                break;
         }
     }
 
+    /*
     open_brace_vector->push_back(-1 * open_brace_last_occurrence);
     close_brace_vector->push_back(-1 * close_brace_last_occurrence);
     open_bracket_vector->push_back(-1 * open_bracket_last_occurrence);
     close_bracket_vector->push_back(-1 * close_bracket_last_occurrence);
-    colon_vector->push_back(-1 * open_brace_last_occurrence);
-    comma_vector->push_back(-1 * open_brace_last_occurrence);
+    colon_vector->push_back(-1 * colon_last_occurrence);
+    comma_vector->push_back(-1 * comma_last_occurrence);
+    */
+
+    last_occurrence[threadIdx.x][0] = -1 * open_brace_last_occurrence;
+    last_occurrence[threadIdx.x][1] = -1 * close_brace_last_occurrence;
+    last_occurrence[threadIdx.x][2] = -1 * open_bracket_last_occurrence;
+    last_occurrence[threadIdx.x][3] = -1 * close_bracket_last_occurrence;
+    last_occurrence[threadIdx.x][4] = -1 * colon_last_occurrence;
+    last_occurrence[threadIdx.x][5] = -1 * comma_last_occurrence;
 
     __syncthreads();
-    // join vectors by reduction
-}
-
-
-
-
-/*
-__global__ void buildStructuralIndex() {
     
-}
-
-
-
-
-void scan_json(const char* json_content, size_t file_size, 
-                            size_t* openBracePositions, 
-                            size_t* closeBracePositions,
-                            size_t* openBracketPositions,
-                            size_t* closeBracketPositions,
-                            size_t* colonPositions,
-                            size_t* commaPositions) {
-    
-    
-    
-    
-                                // determine block size:
-
-
-    const int thread_scan_length = 4096; // standard length of page
-    const int thread_per_block = 256; // each block processes 1 MiB
-
-
-
-
-    int num_block = (file_size + thread_per_block * thread_scan_length) / (thread_per_block * thread_scan_length);
-    // launch kernel with: <<<num_block, threads_per_block>>>
-
-    
-
-    // determine appropriate size for {} [] , :
-    // set max for how much of each symbol can be parsed per thread, then launch __shared__
-    // with total size num_thread * max_symbol_per_thread. there is a bit of memory inefficiency
-    // and sparsity but allows us to be safely work on this. VRAM is pretty big for this task.
-    // in a sense its a 0-terminated 2D list, of vec<vec<size_t>> that we are trying to have in here.
-    // if a thread parses more than max_symbol_per_thread, record to some another flag and print out
-    // so this limit can be increased.
-
-
-    // MAYBE ACTUALLY JUST NEED TO IMPLEMENT CUSTOM VECTOR CLASS????
-    // this kinda doesnt work
-    // Kernel code -- to be modified later. 
-
-    const int MAX_SYMBOL_PER_THREAD = 100;
-    size_t size_per_thread = sizeof(int) * MAX_SYMBOL_PER_THREAD;
-    const size_t thread_scan_length = length / blockDim.x;
-
-    __shared__ size_t* openBraceIndex;
-    __shared__ size_t* closeBraceIndex;
-    __shared__ size_t* openBracketIndex;
-    __shared__ size_t* closeBracketIndex;
-    __shared__ size_t* colonIndex;
-    __shared__ size_t* commaIndex;
-    // these should be allocated as array of length (max_symbol_per_thread * thread)
-    
-
-
-
-    int count = 0;
-    int index = 0;
-
-    while (count < MAX_SYMBOL_PER_THREAD && index < thread_scan_length) {
-        char c = json_content[index + threadIdx.x * thread_scan_length];
-        printf(c);
-        switch (c) {
-            case '{':
-                
-            case '}':
-
-            case '[':
-
-            case ']':
-
-            case ':':
-
-            case ',':
-
-            
-        }
+    // adjust value of "first occurrence" by carryover amount stored in last_occurrence matrix from previous thread
+    if (threadIdx.x > 0) {
+        open_brace_vector->     set(0, open_brace_vector      ->get(0)   - last_occurrence[threadIdx.x - 1][0]);
+        close_brace_vector->    set(0, close_brace_vector     ->get(0)   - last_occurrence[threadIdx.x - 1][1]);
+        open_bracket_vector->   set(0, open_bracket_vector    ->get(0)   - last_occurrence[threadIdx.x - 1][2]);
+        close_bracket_vector->  set(0, close_bracket_vector   ->get(0)   - last_occurrence[threadIdx.x - 1][3]);
+        colon_vector->          set(0, colon_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][4]);
+        comma_vector->          set(0, comma_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][5]);
     }
 
-    // NOW REDUCE THIS ARRAY BASED ON FIRST VALUE AND LAST VALUE
-
-
-
-
-
+    __syncthreads();
     
+    // join vectors by reduction
+    // initialize 2D array of pointers to vectors storing each thread's vectors
+    // might be able to optimize memory use by casting last_occurrence matrix to void* then to DeviceVector<int>*
+    // basically halves the memory allocation, but should be pretty small overhead
+    // compared to the actual reduction stage in double for loop below.
+    // TODO: dynamically allocate vector_array and last_occurrence matrix instead of static allocation based on num_per_block
 
+    __shared__ DeviceVector<int>* vector_array[NUM_PER_BLOCK][6];
+    vector_array[threadIdx.x][0] = open_brace_vector;
+    vector_array[threadIdx.x][1] = close_brace_vector;
+    vector_array[threadIdx.x][2] = open_bracket_vector;
+    vector_array[threadIdx.x][3] = close_bracket_vector;
+    vector_array[threadIdx.x][4] = colon_vector;
+    vector_array[threadIdx.x][5] = comma_vector;
 
-
-    // launch kernel, which collects intermediate data for the thread block
-
-    // coalesce scanned data from each block into one list and save to output parameters 
-    // need to join the symbols that start and end across thread/blocks. might need to launch separate kernel or
-    // cpu can do this task? Maybe.
+    for (int step = 1; step < blockDim.x; step *= 2) {
+        if (threadIdx.x % (2 * step) == 0) {
+            for (int i = 0; i < 6; i++) {
+                vector_array[threadIdx.x][i]->join(vector_array[threadIdx.x + step][i]);
+            }
+        }
+        __syncthreads();
+    }
+    
+    // assign return values
+    if (threadIdx.x == 0) {
+        open_brace_positions = vector_array[0][0]->getInternalArray();
+        close_brace_positions = vector_array[0][1]->getInternalArray();
+        open_bracket_positions = vector_array[0][2]->getInternalArray();
+        close_bracket_positions = vector_array[0][3]->getInternalArray();
+        colon_positions = vector_array[0][4]->getInternalArray();
+        comma_positions = vector_array[0][5]->getInternalArray();
+    }
+    __syncthreads();
 }
 
 
 int main() {
     std::cout << "HSR Reliquary Archiver JSON Parser" << std::endl;
     // load json file
-    std::ifstream file(FILEPATH);
+    bool testing = 0;
+    std::string filepath = (testing) ? TEST_FILEPATH : FILEPATH;
+
+    std::ifstream file(filepath);
     if (!file.is_open()) {
-        std::cerr << "Error opening file: " << FILEPATH << std::endl;
+        std::cerr << "Error opening file: " << filepath << std::endl;
         return EXIT_FAILURE;
     }
     std::string json_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -247,25 +228,55 @@ int main() {
 
     // scan json file to generate structural indices
     char* d_json_content;
-    size_t* openBracePositions;
-    size_t* closeBracePositions;
-    size_t* openBracketPositions;
-    size_t* closeBracketPositions;
-    size_t* colonPositions;
-    size_t* commaPositions;
+    int* openBracePositions;
+    int* closeBracePositions;
+    int* openBracketPositions;
+    int* closeBracketPositions;
+    int* colonPositions;
+    int* commaPositions;
+    
+    openBracePositions      = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    closeBracePositions     = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    openBracketPositions    = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    closeBracketPositions   = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    colonPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    commaPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+
+    int* d_openBracePositions;
+    int* d_closeBracePositions;
+    int* d_openBracketPositions;
+    int* d_closeBracketPositions;
+    int* d_colonPositions;
+    int* d_commaPositions;
+
 
     size_t json_size = json_content.size();
+
+    int num_block = (json_size + NUM_PER_BLOCK * CHAR_PER_THREAD) / ((NUM_PER_BLOCK) * (CHAR_PER_THREAD));
+
     cudaMalloc((void**) &d_json_content, json_size);
+    cudaMalloc((void**) &d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    cudaMalloc((void**) &d_openBracketPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    cudaMalloc((void**) &d_closeBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    cudaMalloc((void**) &d_closeBracketPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    cudaMalloc((void**) &d_colonPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    cudaMalloc((void**) &d_commaPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
+
     cudaMemcpy(d_json_content, json_content.data(), json_size, cudaMemcpyHostToDevice);
     
-    scan_json(d_json_content, json_size,    
-                openBracePositions,  
-                closeBracePositions,
-                openBracketPositions,
-                closeBracketPositions,
-                colonPositions,
-                commaPositions);
+
+
+    build_structural_index<<<num_block, NUM_PER_BLOCK>>> (
+        d_json_content,
+        json_size,    
+        d_openBracePositions,  
+        d_closeBracePositions,
+        d_openBracketPositions,
+        d_closeBracketPositions,
+        d_colonPositions,
+        d_commaPositions
+    );
+
+    cudaMemcpy(openBracePositions, d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
     return EXIT_SUCCESS;
 }
-
-*/
