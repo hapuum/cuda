@@ -8,90 +8,136 @@
 // 3. Parellel generate HSR Relic data to HSR Sim data
 
 // includes and defines
+#pragma once
 #include <iostream>
 #include <fstream>
 #include <string>
+#include "cuda_hsr_sim.h"
 
 #define FILEPATH "/home/hapuum/cuda_learn/resource/relic_data.json"
+#define CHAR_PER_THREAD 4096    // 1 full memory page
+#define NUM_PER_BLOCK 256       // makes 1 block = 1MiB
 
-// THIS ENUM IS NOT YET FINISHED LIST OF ALL STATS, BUT IS SUFFICIENT FOR RELICS ONLY
-// WILL EXPAND LATER WHEN CHARACTERS ARE IMPLEMENTED
-typedef enum {
-    HP_FLAT,
-    HP_PCT,
-    ATK_FLAT,
-    ATK_PCT,
-    DEF_FLAT,
-    DEF_PCT,
-    SPD,
-    CRIT_RATE,
-    CRIT_DMG,
-    HEALING_BONUS,
-    ENERGY_RECHARGE_RATE,
-    EFFECT_HIT_RATE,
-    EFFECT_RESISTANCE,
-    ELEMENTAL_DAMAGE_PCT, // might need to expand to specific types in future
-    STAT_TYPE_COUNT
-} stat_type_t;
 
-// typedef enum {} relic_set_t; // FUTURE USE CASE FOR RELIC SET EFFECTS
+template<typename T>
+class
+DeviceVector 
+{
+    T* data;
+    size_t capacity, length;
+    public:
+        __device__ DeviceVector() : data(nullptr), capacity(16), length(0) 
+        {
+            data = new T[capacity];
+        }
 
-// typedefs
-typedef struct {
-    stat_type_t type;
-    float value;
-    int count;
-    int step;
-} substat_t;
+        __device__ ~DeviceVector() { delete[] data; }
+        __device__ void push_back(const T& value) 
+        {
+            if (length >= capacity) 
+            {
+                // Expand capacity
+                capacity *= 2;
+                T* new_data = new T[capacity];
+                for (size_t i = 0; i < length; ++i) new_data[i] = data[i];
+                delete[] data;
+                data = new_data;
+            }
+            data[length++] = value;
+        }
+        __device__ T& operator[](size_t idx) { return data[idx]; }
+        __device__ size_t size() const { return length; }
+};
 
-typedef struct {
-    int set_id;
-    std::string set_name; // to be refactored to enum later
-    std::string slot;
-    int rarity;
-    int level;
-    stat_type_t main_stat;
-    substat_t substats[4];
-    std::string location;
-    bool locked;
-    bool discarded;
-    int _uid;
-} hsr_relic_t;
+__global__
+void
+build_structural_index
+(
+    // input
+    char* file_data, 
+    size_t file_size,
+    // output 
+    size_t* open_brace_positions,
+    size_t* close_brace_positions,
+    size_t* open_bracket_positions,
+    size_t* close_bracket_positions,
+    size_t* colon_positions,
+    size_t* comma_positions
+) 
+{
+    // save index from last occurrence in a matrix, each row = each thread, index 0~5 in this order
+    // later used for joining the vectors.
+    __shared__ int a[blockDim.x][6]; 
 
-// FOR FUTURE USE IN SIMULATION. LEFT AS EMPTY FOR NOW.
-// characters will most likely be stored in global memory as there are not many of them.
-// as relic gets parsed, we can directly assign them to characters.
-typedef struct {
-    int basic;
-    int skill;
-    int ult;
-    int talent;
-    bool ability_1;
-    bool ability_2;
-    bool ability_3;
-    bool stat_1;
-    bool stat_2;
-    bool stat_3;
-    bool stat_4;
-    bool stat_5;
-    bool stat_6;
-    bool stat_7;
-    bool stat_8;
-    bool stat_9;
-    bool stat_10;
-    int ability_version;
-} skills_traces_t;
+    int open_brace_last_occurrence;
+    int close_brace_last_occurrence;
+    int open_bracket_last_occurrence;
+    int close_bracket_last_occurrence;
+    int colon_last_occurrence;
+    int comma_last_occurrence;
 
-typedef struct {
-    int id;
-    std::string name;
-    std::string path;
-    int level;
-    int ascension;
-    int eidolon;
-    skills_traces_t skills;
-    hsr_relic_t relics[6];
-} hsr_character_t;
+    DeviceVector<int>* open_brace_vector = new DeviceVector<int>();
+    DeviceVector<int>* close_brace_vector = new DeviceVector<int>();
+    DeviceVector<int>* open_bracket_vector = new DeviceVector<int>();
+    DeviceVector<int>* close_bracket_vector = new DeviceVector<int>();
+    DeviceVector<int>* colon_vector = new DeviceVector<int>();
+    DeviceVector<int>* comma_vector = new DeviceVector<int>();
+
+    // iterate through each character of assigned section of file_data
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    for (int i = 0; i < CHAR_PER_THREAD; i++) {
+        // update occurrence counter
+        open_brace_last_occurrence++;
+        close_brace_last_occurrence++;
+        open_bracket_last_occurrence++;
+        close_bracket_last_occurrence++;
+        colon_last_occurrence++;
+        comma_last_occurrence++;
+
+        char c = file_data[tid * CHAR_PER_THREAD + i];
+        switch (c) {
+            case '{':
+                open_brace_vector->push_back(open_brace_last_occurrence);
+                open_brace_last_occurrence = 0;
+            case '}':
+                close_brace_vector->push_back(close_brace_last_occurrence);
+                close_brace_last_occurrence = 0;
+            case '[':
+                open_bracket_vector->push_back(open_bracket_last_occurrence);
+                open_bracket_last_occurrence = 0;
+            case ']':
+                close_bracket_vector->push_back(close_bracket_last_occurrence);
+                close_bracket_last_occurrence = 0;
+            case ':':
+                colon_vector->push_back(open_brace_last_occurrence);
+                colon_last_occurrence = 0;
+            case ',':
+                comma_vector->push_back(open_brace_last_occurrence);
+                comma_last_occurrence = 0;
+        }
+    }
+
+    open_brace_vector->push_back(-1 * open_brace_last_occurrence);
+    close_brace_vector->push_back(-1 * close_brace_last_occurrence);
+    open_bracket_vector->push_back(-1 * open_bracket_last_occurrence);
+    close_bracket_vector->push_back(-1 * close_bracket_last_occurrence);
+    colon_vector->push_back(-1 * open_brace_last_occurrence);
+    comma_vector->push_back(-1 * open_brace_last_occurrence);
+
+    __syncthreads();
+    // join vectors by reduction
+}
+
+
+
+
+/*
+__global__ void buildStructuralIndex() {
+    
+}
+
+
+
 
 void scan_json(const char* json_content, size_t file_size, 
                             size_t* openBracePositions, 
@@ -129,8 +175,7 @@ void scan_json(const char* json_content, size_t file_size,
 
     // MAYBE ACTUALLY JUST NEED TO IMPLEMENT CUSTOM VECTOR CLASS????
     // this kinda doesnt work
-
-    /* Kernel code -- to be modified later. 
+    // Kernel code -- to be modified later. 
 
     const int MAX_SYMBOL_PER_THREAD = 100;
     size_t size_per_thread = sizeof(int) * MAX_SYMBOL_PER_THREAD;
@@ -172,7 +217,6 @@ void scan_json(const char* json_content, size_t file_size,
 
     // NOW REDUCE THIS ARRAY BASED ON FIRST VALUE AND LAST VALUE
 
-    */
 
 
 
@@ -224,3 +268,4 @@ int main() {
     return EXIT_SUCCESS;
 }
 
+*/
