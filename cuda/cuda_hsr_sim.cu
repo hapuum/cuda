@@ -66,7 +66,17 @@ DeviceVector
         __device__ T* getInternalArray() {
             return data;
         }
+
+        __device__ void printVector() {
+            for (int i = 0; i < this->length; i++) {
+                printf("%d \n", this->get(i));
+            }
+            printf("\n");
+        }
 };
+
+
+
 
 __global__
 void
@@ -120,6 +130,7 @@ build_structural_index
             case '{':
                 open_brace_vector->push_back(open_brace_last_occurrence);
                 open_brace_last_occurrence = 0;
+                //printf("{ found at %d, thread: %d, block: %d, i: %d \n", idx * CHAR_PER_THREAD + i, threadIdx.x, blockIdx.x, i);
                 break;
             case '}':
                 close_brace_vector->push_back(close_brace_last_occurrence);
@@ -159,9 +170,15 @@ build_structural_index
     last_occurrence[threadIdx.x][3] = -1 * close_bracket_last_occurrence;
     last_occurrence[threadIdx.x][4] = -1 * colon_last_occurrence;
     last_occurrence[threadIdx.x][5] = -1 * comma_last_occurrence;
-
-    __syncthreads();
     
+    __syncthreads();
+
+    // DEBUG - thread level scanning correctness
+    // if (threadIdx.x == 1) {
+    //     open_brace_vector->printVector();
+    //     printf("----------------------------------\n");
+    // }
+
     // adjust value of "first occurrence" by carryover amount stored in last_occurrence matrix from previous thread
     if (threadIdx.x > 0) {
         open_brace_vector->     set(0, open_brace_vector      ->get(0)   - last_occurrence[threadIdx.x - 1][0]);
@@ -171,6 +188,14 @@ build_structural_index
         colon_vector->          set(0, colon_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][4]);
         comma_vector->          set(0, comma_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][5]);
     }
+
+    // DEBUG - Coalesce thread boundary values
+    // if (threadIdx.x == 1) {
+    //     printf("should be subtracted by %d \n", last_occurrence[0][0]);
+    //     open_brace_vector->printVector();
+    // }
+
+    // BEHAVIOR UP TO THIS POINT SEEMS CORRECT
 
     __syncthreads();
     
@@ -196,6 +221,12 @@ build_structural_index
             }
         }
         __syncthreads();
+        // DEBUG - reduction
+        // if (threadIdx.x == 0) {
+        //     printf("thread 0, step %d, should cover 2 * %d threads \n", step, step);
+        //     printf("--------------------------------------------\n");
+        //     vector_array[threadIdx.x][0]->printVector();
+        // }
     }
     
     // assign return values
@@ -206,8 +237,13 @@ build_structural_index
         close_bracket_positions = vector_array[0][3]->getInternalArray();
         colon_positions = vector_array[0][4]->getInternalArray();
         comma_positions = vector_array[0][5]->getInternalArray();
+    
+        // DEBUG - return val
+        // vector_array[threadIdx.x][0]->printVector();
     }
     __syncthreads();
+
+
 }
 
 
@@ -278,5 +314,7 @@ int main() {
     );
 
     cudaMemcpy(openBracePositions, d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    // MAYBE CHANGE SOME RETURN TYPE -- RETURNING A VECTOR IS NOT TOO BAD?
+    // can explicitly extract internal array in host then just reuse it for now actually parsing json.
     return EXIT_SUCCESS;
 }
