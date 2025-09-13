@@ -51,10 +51,8 @@ DeviceVector
             }
             data[length++] = value;
         }
-        __device__ T& operator[](size_t idx) { return data[idx]; }
-        __device__ size_t size() const { return length; }
+
         __device__ void set(size_t idx, const T& value) { data[idx] = value; }
-        __device__ T& get(size_t idx) { return data[idx]; }
 
         __device__ void join(DeviceVector<T>* next) 
         {
@@ -67,16 +65,19 @@ DeviceVector
             return data;
         }
 
-        __device__ void printVector() {
+        __host__ __device__ void printVector() {
             for (int i = 0; i < this->length; i++) {
                 printf("%d \n", this->get(i));
             }
             printf("\n");
         }
+
+        // host can only read and cannot modify.
+        __host__ __device__ T& operator[](size_t idx) { return data[idx]; }
+        __host__ __device__ size_t size() const { return length; }
+        __host__ __device__ T& get(size_t idx) { return data[idx]; }
+
 };
-
-
-
 
 __global__
 void
@@ -85,7 +86,7 @@ build_structural_index
     // input
     char* file_data, 
     size_t file_size,
-    // output 
+    // output
     int* open_brace_positions,
     int* close_brace_positions,
     int* open_bracket_positions,
@@ -230,14 +231,43 @@ build_structural_index
     }
     
     // assign return values
+    // work 6 threads for copying each array to output 
+    switch (threadIdx.x) {
+        case 0:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                open_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        case 1:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                close_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        case 2:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                open_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        case 3:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                close_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        case 4:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                colon_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        case 5:
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+                comma_positions[i] = vector_array[0][threadIdx.x]->get(i);
+            }
+            break;
+        default: 
+            break;
+    }
+
     if (threadIdx.x == 0) {
-        open_brace_positions = vector_array[0][0]->getInternalArray();
-        close_brace_positions = vector_array[0][1]->getInternalArray();
-        open_bracket_positions = vector_array[0][2]->getInternalArray();
-        close_bracket_positions = vector_array[0][3]->getInternalArray();
-        colon_positions = vector_array[0][4]->getInternalArray();
-        comma_positions = vector_array[0][5]->getInternalArray();
-    
         // DEBUG - return val
         // vector_array[threadIdx.x][0]->printVector();
     }
@@ -245,7 +275,6 @@ build_structural_index
 
 
 }
-
 
 int main() {
     std::cout << "HSR Reliquary Archiver JSON Parser" << std::endl;
@@ -264,19 +293,13 @@ int main() {
 
     // scan json file to generate structural indices
     char* d_json_content;
-    int* openBracePositions;
-    int* closeBracePositions;
-    int* openBracketPositions;
-    int* closeBracketPositions;
-    int* colonPositions;
-    int* commaPositions;
     
-    openBracePositions      = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
-    closeBracePositions     = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
-    openBracketPositions    = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
-    closeBracketPositions   = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
-    colonPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
-    commaPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* openBracePositions      = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* closeBracePositions     = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* openBracketPositions    = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* closeBracketPositions   = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* colonPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
+    int* commaPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
 
     int* d_openBracePositions;
     int* d_closeBracePositions;
@@ -284,7 +307,6 @@ int main() {
     int* d_closeBracketPositions;
     int* d_colonPositions;
     int* d_commaPositions;
-
 
     size_t json_size = json_content.size();
 
@@ -299,8 +321,6 @@ int main() {
     cudaMalloc((void**) &d_commaPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
 
     cudaMemcpy(d_json_content, json_content.data(), json_size, cudaMemcpyHostToDevice);
-    
-
 
     build_structural_index<<<num_block, NUM_PER_BLOCK>>> (
         d_json_content,
@@ -313,8 +333,17 @@ int main() {
         d_commaPositions
     );
 
+    // Get the internal array pointer from device (you need to expose this pointer, e.g. via a kernel or by returning it)
     cudaMemcpy(openBracePositions, d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
-    // MAYBE CHANGE SOME RETURN TYPE -- RETURNING A VECTOR IS NOT TOO BAD?
-    // can explicitly extract internal array in host then just reuse it for now actually parsing json.
+
+    // Debug: check for successful memory copy
+    for (int i = 0; i < T0_DEFAULT_MAX_SIZE; i++) {
+        printf("%d \n", openBracePositions[i]);
+    }
+        
+
+
+
+
     return EXIT_SUCCESS;
 }
