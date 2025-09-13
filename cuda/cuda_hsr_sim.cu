@@ -127,6 +127,9 @@ build_structural_index
         comma_last_occurrence++;
 
         char c = file_data[idx * CHAR_PER_THREAD + i];
+        // TODO: Maybe change logic here a bit?
+        // Do i need distance between? or do i just need absolute location?
+        // seems actually pretty easier to use absolute location with the queue dispatching?
         switch (c) {
             case '{':
                 open_brace_vector->push_back(open_brace_last_occurrence);
@@ -341,7 +344,24 @@ int main() {
         printf("%d \n", openBracePositions[i]);
     }
         
+    struct Task {
+    int start;
+    int end;
+};
 
+    // __device__ Task workQueue[MAX_TASKS];
+    // __device__ int queueHead = 0;
+
+    // __global__ void parse_json(char* json, int* openBraces, int* closeBraces, int numObjects) {
+    //     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    //     while (true) {
+    //         int taskIdx = atomicAdd(&queueHead, 1);
+    //         if (taskIdx >= numObjects) break;
+    //         Task t = workQueue[taskIdx];
+    //         // Parse json[t.start ... t.end]
+    //         // If nested object found, atomicAdd to queueHead and add new Task
+    //     }
+    // }
 
 
 
