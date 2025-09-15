@@ -95,16 +95,6 @@ build_structural_index
     int* comma_positions
 ) 
 {
-    // save index from last occurrence in a matrix, each row = each thread, index 0~5 in this order
-    // later used for joining the vectors.
-    __shared__ int last_occurrence[NUM_PER_BLOCK][6]; 
-
-    int open_brace_last_occurrence = 0;
-    int close_brace_last_occurrence = 0;
-    int open_bracket_last_occurrence = 0;
-    int close_bracket_last_occurrence = 0;
-    int colon_last_occurrence = 0;
-    int comma_last_occurrence = 0;
 
     size_t vector_capacity = (threadIdx.x == 0) ? T0_DEFAULT_MAX_SIZE : REST_DEFAULT_MAX_SIZE;
 
@@ -119,96 +109,35 @@ build_structural_index
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     for (int i = 0; i < CHAR_PER_THREAD; i++) {
         // update occurrence counter
-        open_brace_last_occurrence++;
-        close_brace_last_occurrence++;
-        open_bracket_last_occurrence++;
-        close_bracket_last_occurrence++;
-        colon_last_occurrence++;
-        comma_last_occurrence++;
 
         char c = file_data[idx * CHAR_PER_THREAD + i];
-        // TODO: Maybe change logic here a bit?
-        // Do i need distance between? or do i just need absolute location?
-        // seems actually pretty easier to use absolute location with the queue dispatching?
-        switch (c) {
+        switch (c) 
+        {
             case '{':
-                open_brace_vector->push_back(open_brace_last_occurrence);
-                open_brace_last_occurrence = 0;
-                //printf("{ found at %d, thread: %d, block: %d, i: %d \n", idx * CHAR_PER_THREAD + i, threadIdx.x, blockIdx.x, i);
+                open_brace_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
             case '}':
-                close_brace_vector->push_back(close_brace_last_occurrence);
-                close_brace_last_occurrence = 0;
+                close_brace_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
             case '[':
-                open_bracket_vector->push_back(open_bracket_last_occurrence);
-                open_bracket_last_occurrence = 0;
+                open_bracket_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
             case ']':
-                close_bracket_vector->push_back(close_bracket_last_occurrence);
-                close_bracket_last_occurrence = 0;
+                close_bracket_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
             case ':':
-                colon_vector->push_back(open_brace_last_occurrence);
-                colon_last_occurrence = 0;
+                colon_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
             case ',':
-                comma_vector->push_back(open_brace_last_occurrence);
-                comma_last_occurrence = 0;
+                comma_vector->push_back(idx * CHAR_PER_THREAD + i);
                 break;
         }
     }
-
-    /*
-    open_brace_vector->push_back(-1 * open_brace_last_occurrence);
-    close_brace_vector->push_back(-1 * close_brace_last_occurrence);
-    open_bracket_vector->push_back(-1 * open_bracket_last_occurrence);
-    close_bracket_vector->push_back(-1 * close_bracket_last_occurrence);
-    colon_vector->push_back(-1 * colon_last_occurrence);
-    comma_vector->push_back(-1 * comma_last_occurrence);
-    */
-
-    last_occurrence[threadIdx.x][0] = -1 * open_brace_last_occurrence;
-    last_occurrence[threadIdx.x][1] = -1 * close_brace_last_occurrence;
-    last_occurrence[threadIdx.x][2] = -1 * open_bracket_last_occurrence;
-    last_occurrence[threadIdx.x][3] = -1 * close_bracket_last_occurrence;
-    last_occurrence[threadIdx.x][4] = -1 * colon_last_occurrence;
-    last_occurrence[threadIdx.x][5] = -1 * comma_last_occurrence;
     
-    __syncthreads();
-
-    // DEBUG - thread level scanning correctness
-    // if (threadIdx.x == 1) {
-    //     open_brace_vector->printVector();
-    //     printf("----------------------------------\n");
-    // }
-
-    // adjust value of "first occurrence" by carryover amount stored in last_occurrence matrix from previous thread
-    if (threadIdx.x > 0) {
-        open_brace_vector->     set(0, open_brace_vector      ->get(0)   - last_occurrence[threadIdx.x - 1][0]);
-        close_brace_vector->    set(0, close_brace_vector     ->get(0)   - last_occurrence[threadIdx.x - 1][1]);
-        open_bracket_vector->   set(0, open_bracket_vector    ->get(0)   - last_occurrence[threadIdx.x - 1][2]);
-        close_bracket_vector->  set(0, close_bracket_vector   ->get(0)   - last_occurrence[threadIdx.x - 1][3]);
-        colon_vector->          set(0, colon_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][4]);
-        comma_vector->          set(0, comma_vector           ->get(0)   - last_occurrence[threadIdx.x - 1][5]);
-    }
-
-    // DEBUG - Coalesce thread boundary values
-    // if (threadIdx.x == 1) {
-    //     printf("should be subtracted by %d \n", last_occurrence[0][0]);
-    //     open_brace_vector->printVector();
-    // }
-
-    // BEHAVIOR UP TO THIS POINT SEEMS CORRECT
-
     __syncthreads();
     
     // join vectors by reduction
     // initialize 2D array of pointers to vectors storing each thread's vectors
-    // might be able to optimize memory use by casting last_occurrence matrix to void* then to DeviceVector<int>*
-    // basically halves the memory allocation, but should be pretty small overhead
-    // compared to the actual reduction stage in double for loop below.
-    // TODO: dynamically allocate vector_array and last_occurrence matrix instead of static allocation based on num_per_block
 
     __shared__ DeviceVector<int>* vector_array[NUM_PER_BLOCK][6];
     vector_array[threadIdx.x][0] = open_brace_vector;
@@ -218,65 +147,61 @@ build_structural_index
     vector_array[threadIdx.x][4] = colon_vector;
     vector_array[threadIdx.x][5] = comma_vector;
 
-    for (int step = 1; step < blockDim.x; step *= 2) {
-        if (threadIdx.x % (2 * step) == 0) {
-            for (int i = 0; i < 6; i++) {
+    for (int step = 1; step < blockDim.x; step *= 2) 
+    {
+        if (threadIdx.x % (2 * step) == 0) 
+        {
+            for (int i = 0; i < 6; i++) 
+            {
                 vector_array[threadIdx.x][i]->join(vector_array[threadIdx.x + step][i]);
             }
         }
         __syncthreads();
-        // DEBUG - reduction
-        // if (threadIdx.x == 0) {
-        //     printf("thread 0, step %d, should cover 2 * %d threads \n", step, step);
-        //     printf("--------------------------------------------\n");
-        //     vector_array[threadIdx.x][0]->printVector();
-        // }
     }
     
     // assign return values
     // work 6 threads for copying each array to output 
-    switch (threadIdx.x) {
+    switch (threadIdx.x) 
+    {
         case 0:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 open_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         case 1:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 close_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         case 2:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 open_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         case 3:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 close_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         case 4:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 colon_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         case 5:
-            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) {
+            for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
+            {
                 comma_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
             break;
         default: 
             break;
     }
-
-    if (threadIdx.x == 0) {
-        // DEBUG - return val
-        // vector_array[threadIdx.x][0]->printVector();
-    }
-    __syncthreads();
-
-
 }
 
 int main() {
@@ -286,7 +211,8 @@ int main() {
     std::string filepath = (testing) ? TEST_FILEPATH : FILEPATH;
 
     std::ifstream file(filepath);
-    if (!file.is_open()) {
+    if (!file.is_open()) 
+    {
         std::cerr << "Error opening file: " << filepath << std::endl;
         return EXIT_FAILURE;
     }
