@@ -98,6 +98,12 @@ build_structural_index
 
     size_t vector_capacity = (threadIdx.x == 0) ? T0_DEFAULT_MAX_SIZE : REST_DEFAULT_MAX_SIZE;
 
+    // @TODO: MAYBE Refactor DeviceVector to __shared__ priorityqueue interface, 
+    //          where each thread adds to the shared priorityqueue in some safe locked manner
+    //          Such implementation can remove 1) reduction stage, 2) sorting stage for pair of symbols
+    //          This might require coming up with a struct/class that can be added to this priorityqueue, 
+    //          that can be either: pair {} or pair [] or : or ,
+    
     DeviceVector<int>* open_brace_vector = new DeviceVector<int>(vector_capacity);
     DeviceVector<int>* close_brace_vector = new DeviceVector<int>(vector_capacity);
     DeviceVector<int>* open_bracket_vector = new DeviceVector<int>(vector_capacity);
@@ -107,9 +113,8 @@ build_structural_index
 
     // iterate through each character of assigned section of file_data
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    for (int i = 0; i < CHAR_PER_THREAD; i++) {
-        // update occurrence counter
-
+    for (int i = 0; i < CHAR_PER_THREAD; i++) 
+    {
         char c = file_data[idx * CHAR_PER_THREAD + i];
         switch (c) 
         {
@@ -261,8 +266,7 @@ int main() {
         d_colonPositions,
         d_commaPositions
     );
-
-    // Get the internal array pointer from device (you need to expose this pointer, e.g. via a kernel or by returning it)
+    
     cudaMemcpy(openBracePositions, d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
 
     // Debug: check for successful memory copy
@@ -270,10 +274,10 @@ int main() {
         printf("%d \n", openBracePositions[i]);
     }
         
-    struct Task {
-    int start;
-    int end;
-};
+    //     struct Task {
+    //     int start;
+    //     int end;
+    //      };
 
     // __device__ Task workQueue[MAX_TASKS];
     // __device__ int queueHead = 0;
@@ -285,6 +289,11 @@ int main() {
     //         if (taskIdx >= numObjects) break;
     //         Task t = workQueue[taskIdx];
     //         // Parse json[t.start ... t.end]
+               // SEARCH FOR "VARIABLE"
+               // SWITCH("VARIABLE"):
+               //   case("characters"), case("relics"), remaining things we can simply skip.
+
+
     //         // If nested object found, atomicAdd to queueHead and add new Task
     //     }
     // }
