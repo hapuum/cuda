@@ -11,6 +11,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <map>
 #include "cuda_hsr_sim.h"
 
 #define FILEPATH "/home/hapuum/cuda_learn/resource/relic_data.json"
@@ -19,6 +20,20 @@
 #define NUM_PER_BLOCK 256           // makes 1 block = 1MiB
 #define T0_DEFAULT_MAX_SIZE 32768  // default size of DeviceVector at thread 0 vs rest.
 #define REST_DEFAULT_MAX_SIZE 64  // thread 0 is reserved more space for reduction stage
+
+class
+JsonObject
+{
+    std::map<std::string, JsonObject> map;
+    
+    public:
+        JsonObject() {}
+        ~JsonObject() {}
+
+    JsonObject operator[](std::string s) {
+        return map[s];
+    }
+};
 
 template<typename T>
 class
@@ -92,7 +107,13 @@ build_structural_index
     int* open_bracket_positions,
     int* close_bracket_positions,
     int* colon_positions,
-    int* comma_positions
+    int* comma_positions,
+    size_t* size_open_brace,
+    size_t* size_close_brace,
+    size_t* size_open_bracket,
+    size_t* size_close_bracket,
+    size_t* size_colon,
+    size_t* size_comma
 ) 
 {
 
@@ -173,36 +194,42 @@ build_structural_index
             {
                 open_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_open_brace = vector_array[0][threadIdx.x]->size();
             break;
         case 1:
             for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
             {
                 close_brace_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_close_brace = vector_array[0][threadIdx.x]->size();
             break;
         case 2:
             for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
             {
                 open_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_open_bracket = vector_array[0][threadIdx.x]->size();
             break;
         case 3:
             for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
             {
                 close_bracket_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_close_bracket = vector_array[0][threadIdx.x]->size();
             break;
         case 4:
             for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
             {
                 colon_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_colon = vector_array[0][threadIdx.x]->size();
             break;
         case 5:
             for (int i = 0; i < vector_array[0][threadIdx.x]->size(); i++) 
             {
                 comma_positions[i] = vector_array[0][threadIdx.x]->get(i);
             }
+            *size_comma = vector_array[0][threadIdx.x]->size();
             break;
         default: 
             break;
@@ -235,12 +262,26 @@ int main() {
     int* colonPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
     int* commaPositions          = (int*)malloc(sizeof(int) * T0_DEFAULT_MAX_SIZE);
 
+    size_t size_openBrace_vector;
+    size_t size_closeBrace_vector;
+    size_t size_openBracket_vector;
+    size_t size_closeBracket_vector;
+    size_t size_colon_vector;
+    size_t size_comma_vector;
+
     int* d_openBracePositions;
     int* d_closeBracePositions;
     int* d_openBracketPositions;
     int* d_closeBracketPositions;
     int* d_colonPositions;
     int* d_commaPositions;
+
+    size_t* d_size_openBrace_vector;
+    size_t* d_size_closeBrace_vector;
+    size_t* d_size_openBracket_vector;
+    size_t* d_size_closeBracket_vector;
+    size_t* d_size_colon_vector;
+    size_t* d_size_comma_vector;
 
     size_t json_size = json_content.size();
 
@@ -254,6 +295,13 @@ int main() {
     cudaMalloc((void**) &d_colonPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
     cudaMalloc((void**) &d_commaPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE);
 
+    cudaMalloc((void**)&d_size_openBrace_vector, sizeof(size_t));
+    cudaMalloc((void**)&d_size_closeBrace_vector, sizeof(size_t));
+    cudaMalloc((void**)&d_size_openBracket_vector, sizeof(size_t));
+    cudaMalloc((void**)&d_size_closeBracket_vector, sizeof(size_t));
+    cudaMalloc((void**)&d_size_colon_vector, sizeof(size_t));
+    cudaMalloc((void**)&d_size_comma_vector, sizeof(size_t));
+
     cudaMemcpy(d_json_content, json_content.data(), json_size, cudaMemcpyHostToDevice);
 
     build_structural_index<<<num_block, NUM_PER_BLOCK>>> (
@@ -264,16 +312,55 @@ int main() {
         d_openBracketPositions,
         d_closeBracketPositions,
         d_colonPositions,
-        d_commaPositions
+        d_commaPositions,
+        d_size_openBrace_vector,
+        d_size_closeBrace_vector,
+        d_size_openBracket_vector,
+        d_size_closeBracket_vector,
+        d_size_colon_vector,
+        d_size_comma_vector
     );
     
     cudaMemcpy(openBracePositions, d_openBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(closeBracePositions, d_closeBracePositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(openBracketPositions, d_openBracketPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(closeBracketPositions, d_closeBracketPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(colonPositions, d_colonPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(commaPositions, d_commaPositions, sizeof(int) * T0_DEFAULT_MAX_SIZE, cudaMemcpyDeviceToHost);
 
-    // Debug: check for successful memory copy
-    for (int i = 0; i < T0_DEFAULT_MAX_SIZE; i++) {
-        printf("%d \n", openBracePositions[i]);
+    cudaMemcpy(&size_openBrace_vector, d_size_openBrace_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&size_closeBrace_vector, d_size_closeBrace_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&size_openBracket_vector, d_size_openBracket_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&size_closeBracket_vector, d_size_closeBracket_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&size_colon_vector, d_size_colon_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&size_comma_vector, d_size_comma_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+
+
+    std::cout << "size of open brace vector: " << size_openBrace_vector << std::endl;
+
+    if (size_openBrace_vector != size_closeBrace_vector) {
+        std::cout << "invalid file content: { and } amount does not match" << std::endl;
+        return EXIT_FAILURE;
     }
-        
+
+    if (size_openBracket_vector != size_closeBracket_vector) {
+        std::cout << "invalid file content: [ and ] amount does not match" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    size_t pos_CHARACTERS   = json_content.find("characters");
+    size_t pos_RELICS       = json_content.find("relics");
+
+    if (pos_CHARACTERS == std::string::npos || pos_RELICS == std::string::npos) {
+        std::cout << "invalid file content: cannot find \"characters\" or \"relics\"" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "\"characters\" is found at: " << pos_CHARACTERS << std::endl;
+    std::cout << "\"relics\" is found at: " << pos_RELICS << std::endl;
+
+    // DO SOME PROCESSING TO FIND WHERE THE RANGE FOR THESE END?
+
     //     struct Task {
     //     int start;
     //     int end;
@@ -292,8 +379,6 @@ int main() {
                // SEARCH FOR "VARIABLE"
                // SWITCH("VARIABLE"):
                //   case("characters"), case("relics"), remaining things we can simply skip.
-
-
     //         // If nested object found, atomicAdd to queueHead and add new Task
     //     }
     // }
