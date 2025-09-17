@@ -21,17 +21,23 @@
 #define T0_DEFAULT_MAX_SIZE 32768  // default size of DeviceVector at thread 0 vs rest.
 #define REST_DEFAULT_MAX_SIZE 64  // thread 0 is reserved more space for reduction stage
 
+typedef struct Payload
+{
+    JsonObject json;
+    std::string type;
+};
+
 class
 JsonObject
 {
-    std::map<std::string, JsonObject> map;
+    std::map<std::string, Payload> map;
     
     public:
         JsonObject() {}
         ~JsonObject() {}
 
     JsonObject operator[](std::string s) {
-        return map[s];
+        return map[s].json;
     }
 };
 
@@ -334,6 +340,10 @@ int main() {
     cudaMemcpy(&size_closeBracket_vector, d_size_closeBracket_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(&size_colon_vector, d_size_colon_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(&size_comma_vector, d_size_comma_vector, sizeof(size_t), cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < size_openBrace_vector; i++) {
+        std::cout << openBracePositions[i] << std::endl;
+    }
 
 
     std::cout << "size of open brace vector: " << size_openBrace_vector << std::endl;
