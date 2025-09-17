@@ -39,6 +39,13 @@ JsonObject
     JsonObject operator[](std::string s) {
         return map[s].json;
     }
+
+    void addEntry(int data) {};
+    void addEntry(bool data) {};
+    void addEntry(std::string data) {};
+    void addEntry(JsonObject data[]) {};
+    void addEntry(JsonObject data) {};
+
 };
 
 template<typename T>
