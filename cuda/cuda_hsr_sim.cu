@@ -20,33 +20,150 @@
 #define NUM_PER_BLOCK 256           // makes 1 block = 1MiB
 #define T0_DEFAULT_MAX_SIZE 32768  // default size of DeviceVector at thread 0 vs rest.
 #define REST_DEFAULT_MAX_SIZE 64  // thread 0 is reserved more space for reduction stage
+#define MAX_TASKS 32768           // change this number as needed
 
-typedef struct Payload
+
+typedef enum json_datatype
 {
-    JsonObject json;
-    std::string type;
+    STRING,
+    INT,
+    BOOL,
+    JSON,
+    LIST
+};
+
+class json_object 
+{
+    public:
+        std::map<std::string, json_map_payload> map;
+
+    // modify operator so ['key'] can access what we need
+    // add get / add / remove on map to use while 
+    void addObject(std::string key, json_map_payload value) {
+        map[key] = value;
+    }
+
+    json_map_payload operator[] (std::string key) {
+        return map[key];
+    }
 };
 
 class
-JsonObject
+json_map_payload
 {
-    std::map<std::string, Payload> map;
-    
-    public:
-        JsonObject() {}
-        ~JsonObject() {}
+    void* data;
+    json_datatype type;
 
-    JsonObject operator[](std::string s) {
-        return map[s].json;
+    // Constructor for STRING
+    json_map_payload(const std::string& val) : type(STRING) {
+        data = new std::string(val);
+    }
+    // Constructor for INT
+    json_map_payload(int val) : type(INT) {
+        data = new int(val);
+    }
+    // Constructor for BOOL
+    json_map_payload(bool val) : type(BOOL) {
+        data = new bool(val);
+    }
+    // Constructor for JSON object (recursive)
+    json_map_payload(json_object& val) : type(JSON) {
+        data = new json_object(val);
+    }
+    // Constructor for LIST
+    json_map_payload(const DeviceVector<json_object>& val) : type(LIST) {
+        DeviceVector<json_object>* d = new DeviceVector<json_object>(4); // relics have max 4 substat
+        d->join(&val);
+        data = d;
     }
 
-    void addEntry(int data) {};
-    void addEntry(bool data) {};
-    void addEntry(std::string data) {};
-    void addEntry(JsonObject data[]) {};
-    void addEntry(JsonObject data) {};
-
+    // Destructor
+    ~json_map_payload() {
+        switch (type) {
+            case STRING:
+                delete static_cast<std::string*>(data);
+                break;
+            case INT:
+                delete static_cast<int*>(data);
+                break;
+            case BOOL:
+                delete static_cast<bool*>(data);
+                break;
+            case JSON:
+                delete static_cast<json_object*>(data);
+                break;
+            case LIST:
+                delete static_cast<DeviceVector<json_object>*>(data);
+                break;
+        }
+    }
 };
+
+typedef struct {
+    int start;
+    int end;
+    json_object* json_obj_ptr;
+} Task;
+
+__global__ void process_json
+(
+char* json,
+int* openBraces, 
+int* closeBraces,
+int* openBrackets,
+int* closeBrackets,
+int* colons,
+int* commas
+// outputs?
+)
+{
+    __shared__ Task task_queue[MAX_TASKS];
+    __shared__ int queue_tail = 0;
+    __shared__ int queue_head = 0;
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid == 0) 
+    {
+        // fire starter
+    }
+
+    while (true) {
+        if (queue_head == queue_tail) continue;
+        int task_index = atomicAdd(&queue_head, 1);
+        if (task_index > MAX_TASKS) break;
+        Task t = task_queue[task_index];
+        // PROCESS TASK
+        // IF NESTED JSON OBJECT FOUND, QUEUE NEW ONE WITH NEWLY CONSTRUCTED START/END
+        
+    }
+}
+
+    // DO SOME PROCESSING TO FIND WHERE THE RANGE FOR THESE END?
+
+    //     struct Task {
+    //     int start;
+    //     int end;
+    //      };
+
+    // __device__ Task workQueue[MAX_TASKS];
+    // __device__ int queueHead = 0;
+
+    // __global__ void parse_json(char* json, int* openBraces, int* closeBraces, int numObjects) {
+    //     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    //     while (true) {
+    //         int taskIdx = atomicAdd(&queueHead, 1);
+    //         if (taskIdx >= numObjects) break;
+    //         Task t = workQueue[taskIdx];
+    //         // Parse json[t.start ... t.end]
+               // SEARCH FOR "VARIABLE"
+               // SWITCH("VARIABLE"):
+               //   case("characters"), case("relics"), remaining things we can simply skip.
+    //         // If nested object found, atomicAdd to queueHead and add new Task
+    //     }
+    // }
+
+
+
+
 
 template<typename T>
 class
@@ -82,7 +199,7 @@ DeviceVector
 
         __device__ void set(size_t idx, const T& value) { data[idx] = value; }
 
-        __device__ void join(DeviceVector<T>* next) 
+        __device__ void join(const DeviceVector<T>* next) 
         {
             for (int i = 0; i < next->length; i++) {
                 this->push_back(next->get(i));
@@ -375,32 +492,6 @@ int main() {
 
     std::cout << "\"characters\" is found at: " << pos_CHARACTERS << std::endl;
     std::cout << "\"relics\" is found at: " << pos_RELICS << std::endl;
-
-    // DO SOME PROCESSING TO FIND WHERE THE RANGE FOR THESE END?
-
-    //     struct Task {
-    //     int start;
-    //     int end;
-    //      };
-
-    // __device__ Task workQueue[MAX_TASKS];
-    // __device__ int queueHead = 0;
-
-    // __global__ void parse_json(char* json, int* openBraces, int* closeBraces, int numObjects) {
-    //     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    //     while (true) {
-    //         int taskIdx = atomicAdd(&queueHead, 1);
-    //         if (taskIdx >= numObjects) break;
-    //         Task t = workQueue[taskIdx];
-    //         // Parse json[t.start ... t.end]
-               // SEARCH FOR "VARIABLE"
-               // SWITCH("VARIABLE"):
-               //   case("characters"), case("relics"), remaining things we can simply skip.
-    //         // If nested object found, atomicAdd to queueHead and add new Task
-    //     }
-    // }
-
-
 
     return EXIT_SUCCESS;
 }
