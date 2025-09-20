@@ -7,12 +7,21 @@
 // 2. Parellel parse JSON file based on structural index arrays to generate HSR Relic data
 // 3. Parellel generate HSR Relic data to HSR Sim data
 
+// THIS FILE MIGHT NEED HUGE OVERHAUL... 
+// needs 1) architectural reconsideration, 2) better naming convention, 3) GPU friendly codes
+// 
+
+
+
 // includes and defines
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <map>
+#include <stack>
+#include <vector>
 #include "cuda_hsr_sim.h"
+
 
 #define FILEPATH "/home/hapuum/cuda_learn/resource/relic_data.json"
 #define TEST_FILEPATH "/home/hapuum/cuda_learn/resource/test.json"
@@ -21,7 +30,7 @@
 #define T0_DEFAULT_MAX_SIZE 32768  // default size of DeviceVector at thread 0 vs rest.
 #define REST_DEFAULT_MAX_SIZE 64  // thread 0 is reserved more space for reduction stage
 #define MAX_TASKS 32768           // change this number as needed
-
+#define STACK_MAX_DEPTH 10
 
 typedef enum json_datatype
 {
@@ -492,6 +501,41 @@ int main() {
 
     std::cout << "\"characters\" is found at: " << pos_CHARACTERS << std::endl;
     std::cout << "\"relics\" is found at: " << pos_RELICS << std::endl;
+
+    // to be optimized later, making implementations that lets me proceed to later parts first
+
+    // process structural index into objects and store them in array, then processing function takes care of them
+    // struggling to make this part parallel. might need to restructure to make use of prefix sum??
+
+    int index_open_brace = 0;
+    int index_close_brace = 0;
+    std::stack<Task> task_stack;
+    std::vector<Task> result_task;
+    while (index_open_brace < size_openBrace_vector && index_close_brace < size_closeBrace_vector && task_stack.size() < STACK_MAX_DEPTH) {
+        int openbrace = openBracePositions[index_open_brace];
+        int closebrace = closeBracePositions[index_close_brace];
+        if (openbrace < closebrace) {
+            task_stack.push(Task());
+            task_stack.top().start = openbrace;
+            index_open_brace++;
+        }
+        else if (closebrace < openbrace) {
+            task_stack.top().end = closebrace;
+            result_task.push_back(task_stack.top());
+            task_stack.pop();
+            index_close_brace++;
+        }
+    }
+
+    int s = result_task.size();
+    Task* tasks_to_be_dispatched;
+    tasks_to_be_dispatched = (Task*) malloc(sizeof(Task) * s);
+    Task* d_tasks_to_be_dispatched;
+    cudaMalloc((void**) d_tasks_to_be_dispatched, sizeof(Task) * s);
+    for (int i = 0; i < s; i++) {
+        tasks_to_be_dispatched[i] = result_task[i];
+    }
+    cudaMemcpy(d_tasks_to_be_dispatched, tasks_to_be_dispatched, sizeof(Task) * s, cudaMemcpyHostToDevice);
 
     return EXIT_SUCCESS;
 }
