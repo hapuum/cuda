@@ -74,3 +74,35 @@ typedef struct {
     skills_traces_t skills;
     hsr_relic_t relics[6];
 } hsr_character_t;
+
+typedef enum
+{
+    STRING,
+    INT,
+    BOOL,
+    JSON,
+    LIST
+} json_datatype;
+
+class json_object;
+class json_payload {
+    public:
+        void* data;
+        json_datatype type;
+    
+    json_payload();
+    json_payload(const std::string val);
+    json_payload(const int val);
+    json_payload(const bool val);
+    json_payload(const json_object& val);
+
+    ~json_payload();
+}; 
+
+class json_object {
+    public:
+        std::map<std::string, json_payload> map;
+    
+    void addObject(const json_payload obj);
+    json_payload operator[](int index);
+};

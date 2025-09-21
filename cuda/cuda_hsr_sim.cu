@@ -32,30 +32,7 @@
 #define MAX_TASKS 32768           // change this number as needed
 #define STACK_MAX_DEPTH 10
 
-typedef enum json_datatype
-{
-    STRING,
-    INT,
-    BOOL,
-    JSON,
-    LIST
-};
 
-class json_object 
-{
-    public:
-        std::map<std::string, json_map_payload> map;
-
-    // modify operator so ['key'] can access what we need
-    // add get / add / remove on map to use while 
-    void addObject(std::string key, json_map_payload value) {
-        map[key] = value;
-    }
-
-    json_map_payload operator[] (std::string key) {
-        return map[key];
-    }
-};
 
 class
 json_map_payload
@@ -105,6 +82,22 @@ json_map_payload
                 delete static_cast<DeviceVector<json_object>*>(data);
                 break;
         }
+    }
+};
+
+class json_object 
+{
+    public:
+        std::map<std::string, json_map_payload> map;
+
+    // modify operator so ['key'] can access what we need
+    // add get / add / remove on map to use while 
+    void addObject(std::string key, json_map_payload value) {
+        map[key] = value;
+    }
+
+    json_map_payload operator[] (std::string key) {
+        return map[key];
     }
 };
 
@@ -522,7 +515,9 @@ int main() {
         else if (closebrace < openbrace) {
             task_stack.top().end = closebrace;
             result_task.push_back(task_stack.top());
+            
             task_stack.pop();
+
             index_close_brace++;
         }
     }
@@ -536,6 +531,8 @@ int main() {
         tasks_to_be_dispatched[i] = result_task[i];
     }
     cudaMemcpy(d_tasks_to_be_dispatched, tasks_to_be_dispatched, sizeof(Task) * s, cudaMemcpyHostToDevice);
+
+    
 
     return EXIT_SUCCESS;
 }
