@@ -13,45 +13,27 @@ json_object::~json_object() {
 }
 
 void json_object::addObject(std::string key, int* val) {
-    payload p;
-    p.type = INTEGER;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, INTEGER);
 }
 
 void json_object::addObject(std::string key, double* val) {
-    payload p;
-    p.type = DOUBLE;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, DOUBLE);
 }
 
 void json_object::addObject(std::string key, std::string* val) {
-    payload p;
-    p.type = STRING;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, STRING);
 }
 
 void json_object::addObject(std::string key, bool* val) {
-    payload p;
-    p.type = BOOLEAN;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, BOOLEAN);
 }
 
 void json_object::addObject(std::string key, json_object* val) {
-    payload p;
-    p.type = JSON;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, JSON);
 }
 
 void json_object::addObject(std::string key, std::vector<payload>* val) {
-    payload p;
-    p.type = LIST;
-    p.value = val;
-    data[key] = p;
+    data[key] = payload(val, LIST);
 }
 
 payload json_object::operator[](std::string key) {
@@ -128,32 +110,29 @@ std::ostream& operator<< (std::ostream& stream, const json_object& json) {
 int main() {
     using namespace std;
     // TEST CLASS STRUCTURE
-    // json_object json1, json2, json3, json4;
-    // vector<payload> collection;
+    json_object json1, json2, json3, json4;
+    vector<payload> collection;
     
-    // int i = 5;
-    // bool b = true;
-    // json1.addObject("first", &i);
-    // json1.addObject("second", &b);
-    // string s = "example string";
-    // json2.addObject("third", &s);
+    int i = 5;
+    bool b = true;
+    json1.addObject("first", &i);
+    json1.addObject("second", &b);
+    string s = "example string";
+    json2.addObject("third", &s);
 
-    // payload p1, p2;
-    // p1.value = &i,
-    // p1.type = INTEGER;
-    // p2.value = &json1;
-    // p2.type = JSON;
-    // collection.push_back(p1);
-    // collection.push_back(p2);
-    // json3.addObject("fourth", &collection);
-    // json4.addObject("fifth", &json2);
-    // cout << json1 << endl;
-    // cout << json2 << endl;
-    // cout << json3 << endl;
-    // cout << json4 << endl;
+    payload p1(&i, INTEGER);
+    payload p2(&json1, JSON);
+    collection.push_back(p1);
+    collection.push_back(p2);
+    json3.addObject("fourth", &collection);
+    json4.addObject("fifth", &json2);
+    cout << json1 << endl;
+    cout << json2 << endl;
+    cout << json3 << endl;
+    cout << json4 << endl;
 
     bool testing = false;
-    string filepath = (testing) ? "/home/hapuum/cuda_learn/resource/relic_data.json" : "/home/hapuum/cuda_learn/resource/test.json";
+    string filepath = (!testing) ? "/home/hapuum/cuda_learn/resource/relic_data.json" : "/home/hapuum/cuda_learn/resource/test.json";
 
     ifstream file(filepath);
     if (!file.is_open()) 
@@ -167,40 +146,60 @@ int main() {
 
     // CPU sequentially traverses json content char[] and finds pairs using stack, stores it in Task[]
     // later to be replaced with a parellel algorithm (up sweep / down sweep based prefix sum pair generation)
+    // some efforts for parallelizing this part is in cuda/cuda_hsr_sim.cu, but needs more work for now.
+    
+    
+    // string (variable name) also needs a stack of its own it seems.
     stack<task*> task_stack;
     vector<task*> task_dispatchable;
 
     bool inString = false;
     bool inList = false;
     int start = json_content.find_first_of('{');
-    task* t = new task(start, 0, new json_object());
+    json_object* current_json =  new json_object();
+    task* current_task = new task(start, 0, current_json);
+    string current_string;
+    vector<payload>* current_list;
 
     size_t json_size = json_content.size();
-    for (int i = start + 1; i < json_size; i++) {
+    for (int i = start; i < json_size; i++) {
         char c = json_content[i];
+        if (inString && c != '"') current_string = current_string + c;
         switch (c) {
             case '{' : {  // push in current task to save it, start working on new one
-                if (!inString) {
-                    task_stack.push(t);
-                    t = new task(i, 0, new json_object());  // THIS object needs to be added to parent object too? or at least connected somehow
+                if (inString) break;
+                task_stack.push(current_task);
+                json_object* new_json = new json_object();
+                if (!inList) {
+                    current_json->addObject(current_string, new_json);
+
                 }
+                else {  // list stores payloads, instead of pair<string,payload>
+                    payload p = payload(new_json, JSON);
+                    current_list->push_back(p);
+                }
+                current_json = new_json;
+                current_task = new task(i, 0, current_json);
                 break;
             }
             case '}' : {  // finish and dispatch current task, go back to latest task
-                if (!inString) {
-                    t->end = i;
-                    task_dispatchable.push_back(t);                
-                    t = task_stack.top();
-                    task_stack.pop();
-                }
+                if (inString) break;
+                current_task->end = i;
+                task_dispatchable.push_back(current_task);
+                current_task = task_stack.top();
+                current_json = current_task->obj;
+                task_stack.pop();
                 break;
             }
             case '"' : {
                 inString = !inString;
+                if (inString) current_string = "";  // entering new string
                 break;
             }
-            case '[' : {
+            case '[' : {  // need better logic when adding nested array support
                 inList = !inList;
+                current_list = new vector<payload>();
+                current_json->addObject(current_string, current_list);
                 break;
             }
             case ']' : {
@@ -209,13 +208,21 @@ int main() {
             }
             case ',' : {
                 if (inList && !inString) {
-
+                    // push it to correct spot?? dont really need if we dont care about serialization.
+                    // also the algorithm feels awkward on this... needs a separate stack to maintain if this is in a list or not
                 }
                 break;
             }
         }
     }    
 
+    // debug + prep for gpu
+    for (int i = 0; i < task_dispatchable.size(); i++) {
+        task* t = task_dispatchable[i];
+        cout << "start :" << t->start << ", end:" << t->end << " json :" << *(t->obj) << " at memory: " << t->obj << endl;
+    }
+
+    
     // GPU parallel processes all of the task_dispatchable and fills in the json_object in each task
     // extract them for host use
 

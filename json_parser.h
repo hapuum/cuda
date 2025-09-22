@@ -38,6 +38,8 @@ namespace json {
         public:
         void* value;
         json_type type;
+        payload() : value(nullptr), type(INTEGER) { }
+        payload(void* val, json_type t) : value(val), type(t) {};
     };
 
     class task {
