@@ -110,9 +110,9 @@ std::ostream& operator<< (std::ostream& stream, const json_object& json) {
     return stream;
 }
 
-// CPU sequentially traverses json content char[] and finds pairs using stack, stores it in Task[]
-// later to be replaced with a parellel algorithm (up sweep / down sweep based prefix sum pair generation)
-// some efforts for parallelizing this part is in cuda/cuda_hsr_sim.cu, but needs more work for now.
+// CPU sequentially traverses json content string and finds pairs using stack, stores it in Task[]
+// replace with structural index generation (parellel gpu) -> sort -> process the structural tokens from array
+// instead of traversing entire json content string to make it more efficient 
 void create_json_tree(const std::string& json_content, std::vector<task*>& task_dispatchable) {
     stack<task*> task_stack;
     stack<bool> inList_stack;
@@ -230,4 +230,8 @@ int main() {
         task* t = task_dispatchable[i];
         cout << "start :" << t->start << ", end:" << t->end << " json: " << *(t->obj) << " at memory: " << t->obj << endl;
     }
+
+    // now remap task_dispatchable to nice array structure where each thread can access
+    // might need to implement device_compatible_vector and device_compatible_stack for the actual kernel code
+    
 }
