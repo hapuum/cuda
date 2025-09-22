@@ -6,6 +6,7 @@
 using namespace json;
 using namespace std;
 
+// implementation for json_parser.h definitions
 namespace json {
     json_object::json_object() {
         data = std::map<std::string, payload>();
@@ -53,61 +54,59 @@ namespace json {
     void task:: setObject(json_object* o) {
         obj = o;
     }
-}
-
-
-// debug purpose
-std::ostream& operator<< (std::ostream& stream, const json_object& json);
-std::ostream& operator<< (std::ostream& stream, const payload p) {
-    switch(p.type) {
-        case(INTEGER): {
-            int* address = static_cast<int*>(p.value);
-            stream << *address;
-            break;
-        }
-        case(DOUBLE): {
-            stream << *(static_cast<double*>(p.value));
-            break;
-        }
-        case(STRING): {
-            stream << *(static_cast<std::string*>(p.value));
-            break;
-        }
-        case(BOOLEAN): {
-            bool val = *(static_cast<bool*>(p.value));
-            stream << (val ? "true" : "false"); 
-            break;
-        }
-        case(JSON): {
-            stream << *(static_cast<json_object*>(p.value));
-            break;
-        }
-        case(LIST): {
-            auto vec = static_cast<std::vector<payload>*>(p.value);
-            stream << "[";
-            for (size_t i = 0; i < vec->size(); ++i) {
-                if (i > 0) stream << ", ";
-                stream << (*vec)[i];
+    // debug purpose
+    std::ostream& operator<< (std::ostream& stream, const json_object& json);
+    std::ostream& operator<< (std::ostream& stream, const payload p) {
+        switch(p.type) {
+            case(INTEGER): {
+                int* address = static_cast<int*>(p.value);
+                stream << *address;
+                break;
             }
-            stream << "]";
-            break;
+            case(DOUBLE): {
+                stream << *(static_cast<double*>(p.value));
+                break;
+            }
+            case(STRING): {
+                stream << *(static_cast<std::string*>(p.value));
+                break;
+            }
+            case(BOOLEAN): {
+                bool val = *(static_cast<bool*>(p.value));
+                stream << (val ? "true" : "false"); 
+                break;
+            }
+            case(JSON): {
+                stream << *(static_cast<json_object*>(p.value));
+                break;
+            }
+            case(LIST): {
+                auto vec = static_cast<std::vector<payload>*>(p.value);
+                stream << "[";
+                for (size_t i = 0; i < vec->size(); ++i) {
+                    if (i > 0) stream << ", ";
+                    stream << (*vec)[i];
+                }
+                stream << "]";
+                break;
+            }
         }
+        return stream;
     }
-    return stream;
-}
-std::ostream& operator<< (std::ostream& stream, const json_object& json) {
-    stream << "{";
-    bool first = true;
-    for (const auto& pair : json.data) {
-        if (!first) {
-            stream << ", ";
+    std::ostream& operator<< (std::ostream& stream, const json_object& json) {
+        stream << "{";
+        bool first = true;
+        for (const auto& pair : json.data) {
+            if (!first) {
+                stream << ", ";
+            }
+            stream << pair.first << ": ";
+            stream << pair.second;
+            first = false;
         }
-        stream << pair.first << ": ";
-        stream << pair.second;
-        first = false;
+        stream << "}";
+        return stream;
     }
-    stream << "}";
-    return stream;
 }
 
 // CPU sequentially traverses json content string and finds pairs using stack, stores it in Task[]
@@ -183,6 +182,7 @@ void create_json_tree(const std::string& json_content, std::vector<task*>& task_
     }  
 }
 
+// debug purpose and reference code for how to create / access different classes
 void test_class_structure() {
     json_object json1, json2, json3, json4;
     vector<payload> collection;
@@ -207,7 +207,7 @@ void test_class_structure() {
 }
 
 int main() {
-    test_class_structure();
+    //test_class_structure();
 
     bool testing = false;
     string filepath = (!testing) ? "/home/hapuum/cuda_learn/resource/relic_data.json" : "/home/hapuum/cuda_learn/resource/test.json";
