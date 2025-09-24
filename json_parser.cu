@@ -233,7 +233,7 @@ int main() {
     create_json_tree(json_content, task_dispatchable);
 
     task* d_task_array;
-    cudaMalloc((void**) d_task_array, task.dispatchable.size() * sizeof(task*));
+    cudaMalloc((void**) d_task_array, task_dispatchable.size() * sizeof(task*));
     // debug + prep for gpu
     for (int i = 0; i < task_dispatchable.size(); i++) {
         task* t = task_dispatchable[i];
