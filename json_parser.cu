@@ -206,6 +206,13 @@ void test_class_structure() {
     cout << json4 << endl;
 }
 
+__global__ void parse_json() {
+    __shared__ extern char json_content[];
+
+    int tid = threadIdx.x + blockDim.x * blockIdx.x;
+    
+}
+
 int main() {
     //test_class_structure();
 
@@ -225,13 +232,16 @@ int main() {
     vector<task*> task_dispatchable;
     create_json_tree(json_content, task_dispatchable);
 
+    task* d_task_array;
+    cudaMalloc((void**) d_task_array, task.dispatchable.size() * sizeof(task*));
     // debug + prep for gpu
     for (int i = 0; i < task_dispatchable.size(); i++) {
         task* t = task_dispatchable[i];
         cout << "start :" << t->start << ", end:" << t->end << " json: " << *(t->obj) << " at memory: " << t->obj << endl;
     }
 
+
     // now remap task_dispatchable to nice array structure where each thread can access
     // might need to implement device_compatible_vector and device_compatible_stack for the actual kernel code
-    
+   
 }
