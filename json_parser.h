@@ -33,6 +33,12 @@ namespace json {
     class json_buffer;
     class list_buffer;
 
+    class json_data {
+        public:
+        json_value val;
+        json_type type;
+    };
+
     class json_object {
         public:
         int key_string_indices[16];
@@ -40,11 +46,7 @@ namespace json {
         int size;
     };
 
-    class json_data {
-        public:
-        json_value val;
-        json_type type;
-    };
+
 
     // device compatible string buffer. index to this serves like a pointer.
     class string_buffer {
@@ -100,24 +102,26 @@ namespace json {
     } tokenType;
 
     class StructuralToken {
+        public:
         int location;
         tokenType t;
     };
 }
 
-namespace device_utils{
+namespace device_utils {
     template<typename T> class device_vector {
         T* data;
         size_t capacity, length;
-        __device__ DeviceVector : data(nullptr), capacity(16), length(0) {
+        public:
+        __device__ device_vector() : data(nullptr), capacity(16), length(0) {
             data = new T[capacity];
         }
 
-        __device__ DeviceVector(size_t c) : data(nullptr), capacity(c), length(0) {
+        __device__ device_vector(size_t c) : data(nullptr), capacity(c), length(0) {
             data = new T[capacity];
         }
 
-        __device__ ~DeviceVector() { delete[] data; }
+        __device__ ~device_vector() { delete[] data; }
 
         __device__ void push_back(const T& value) {
             if (length >= capacity) {
@@ -132,7 +136,7 @@ namespace device_utils{
 
         __device__ void set(size_t idx, const T& value) { data[idx] = value; }
 
-        __device__ void join(const DeviceVector<T>* next) {
+        __device__ void join(const device_vector<T>* next) {
             for (int i = 0; i < next->length; i++) {
                 this->push_back(next->get(i));
             }
@@ -152,6 +156,6 @@ namespace device_utils{
         // host can only read and cannot modify.
         __host__ __device__ T& operator[](size_t idx) { return data[idx]; }
         __host__ __device__ size_t size() const { return length; }
-        __host__ __device__ T& get(size_t idx) { return data[idx]; }
+        __host__ __device__ T& const get(size_t idx) const { return data[idx]; }
     };
 }

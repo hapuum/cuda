@@ -7,15 +7,14 @@ using namespace json;
 using namespace std;
 using namespace device_utils;
 
+#define FINAL_VECTOR_SIZE 32768
+#define DEFAULT_VECTOR_SIZE 64
+#define CHAR_PER_THREAD 4096
+#define NUM_PER_BLOCK 256
+
+
 // implementation for json_parser.h definitions
 namespace json {
-    json_object::json_object() {
-        size = 0;
-    }
-
-    json_object::~json_object() {
-    }
-
     void task::setStart(int s) {
         start = s;
     }
@@ -111,17 +110,74 @@ namespace json {
     }
 }
 
-namespace device_utils {
+__global__ void get_sorted_structural_tokens(const char* json_content, StructuralToken* tokens) {
+    size_t vector_capacity = (threadIdx.x == 0) ? FINAL_VECTOR_SIZE : DEFAULT_VECTOR_SIZE;
 
+    // allocate token_vector on device heap so other threads can dereference its pointer
+    device_vector<StructuralToken>* token_vector = new device_vector<StructuralToken>(vector_capacity);
+
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    for (int i = 0; i < CHAR_PER_THREAD; i++) {
+        int current_loc = idx * CHAR_PER_THREAD + i;
+        char c = json_content[idx * CHAR_PER_THREAD + i];
+        StructuralToken tok;
+        switch (c) {
+            case '{':
+                tok.location = current_loc;
+                tok.t = OPEN_BRACE;
+                token_vector->push_back(tok);
+                break;
+            case '}':
+                tok.location = current_loc;
+                tok.t = CLOSE_BRACE;
+                token_vector->push_back(tok);
+                break;
+            case '[':
+                tok.location = current_loc;
+                tok.t = OPEN_BRACKET;
+                token_vector->push_back(tok);
+                break;
+            case ']':
+                tok.location = current_loc;
+                tok.t = CLOSE_BRACKET;
+                token_vector->push_back(tok);
+                break;
+            case ':':
+                tok.location = current_loc;
+                tok.t = COLON;
+                token_vector->push_back(tok);
+                break;
+            case ',':
+                tok.location = current_loc;
+                tok.t = COMMA;
+                token_vector->push_back(tok);
+                break;
+        }
+    }
+
+    __shared__ device_vector<StructuralToken>* vector_array[NUM_PER_BLOCK];
+    vector_array[threadIdx.x] = token_vector;
+   
+    __syncthreads();
+    for (int step = 1; step < blockDim.x; step *= 2) {
+        if (threadIdx.x % (2 * step) == 0) {
+            vector_array[threadIdx.x]->join(vector_array[threadIdx.x + step]);
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        int n = vector_array[0]->size();
+        for (int i = 0; i < n; i++) {
+            StructuralToken st = vector_array[0]->get(i);
+            // printf("location :%d, type: %d \n", st.location, st.t);
+            // write into output buffer
+            tokens[i] = st;
+        }
+
+    }
 }
 
-__global__ void get_sorted_tokens(const std::string& json_content, device_vector<StructuralToken> tokens) {
-
-}
-
-
-
-// void create_json_tree(const std::string& json_content, std::vector<task*>& task_dispatchable) {
 //     stack<task*> task_stack;
 //     stack<bool> inList_stack;
 //     stack<vector<json_data>*> current_list_stack;
@@ -202,12 +258,29 @@ int main() {
         return EXIT_FAILURE;
     }
     string json_content((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+    size_t json_size = json_content.size();
     file.close();
     cout << "File loaded successfully. Size: " << json_content.size() << " bytes" << endl;
+
+    StructuralToken* sorted_tokens = (StructuralToken*) malloc(sizeof(StructuralToken) * FINAL_VECTOR_SIZE);
+    StructuralToken* d_sorted_tokens;
+    char* d_json_content;
+    cudaMalloc((void**) &d_json_content, json_size);
+    cudaMalloc((void**) &d_sorted_tokens, sizeof(StructuralToken) * FINAL_VECTOR_SIZE);
+    cudaMemcpy(d_json_content, json_content.data(), json_size, cudaMemcpyHostToDevice);
+
+    int num_block = (json_size + NUM_PER_BLOCK * CHAR_PER_THREAD) / ((NUM_PER_BLOCK) * (CHAR_PER_THREAD));
+    get_sorted_structural_tokens<<<num_block, NUM_PER_BLOCK>>> (d_json_content, d_sorted_tokens);
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(sorted_tokens, d_sorted_tokens, sizeof(StructuralToken) * FINAL_VECTOR_SIZE, cudaMemcpyDeviceToHost);
+    for (int i = 0; i < FINAL_VECTOR_SIZE; i++) {
+        cout << sorted_tokens[i].t << endl;
+    }
+
 
 
     // now remap task_dispatchable to nice array structure where each thread can access
     // might need to implement device_compatible_vector and device_compatible_stack for the actual kernel code
     
 }
- 
