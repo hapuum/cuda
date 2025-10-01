@@ -51,19 +51,24 @@ namespace json {
     // device compatible string buffer. index to this serves like a pointer.
     class string_buffer {
         public:
-        char data[MAX_STRINGS][MAX_STRING_LENGTH]; 
+        char data[MAX_STRINGS][MAX_STRING_LENGTH];
+        int start[MAX_STRINGS];  // location of associated colon or list delimiters
         int size;
         // string lengths are kind of hard to determine right off of tokens and does not vary much so 2D array makes sense
     };
     class json_buffer {
         public:
         json_object data[MAX_CHILDREN_PER_JSON];
+        int start[MAX_CHILDREN_PER_JSON];
+        int end[MAX_CHILDREN_PER_JSON];
         int size;
     };
     class list_buffer {
         public:
         json_object data[MAX_LIST_LENGTH];
         int list_starting_index[MAX_LISTS];
+        int start[MAX_LISTS];
+        int end[MAX_LISTS];
         int size;
         // Tokens are perfectly fine to generate starting index of each list,
         // where other objects navigate into list_starting_index then use that to get where to start data

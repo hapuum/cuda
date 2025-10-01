@@ -56,6 +56,7 @@ namespace json {
     }
 }
 
+// Assumes clean data -- no escaped string, no tokens inside of a string. reasonable expectation for hsr sim use case
 __global__ void get_sorted_structural_tokens(const char* json_content, StructuralToken* tokens, int* tokens_size, const size_t& json_size) {
     size_t vector_capacity = (threadIdx.x == 0) ? FINAL_VECTOR_SIZE : DEFAULT_VECTOR_SIZE;
     device_vector<StructuralToken>* token_vector = new device_vector<StructuralToken>(vector_capacity);
@@ -129,6 +130,22 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
     return;
 }
 
+// initializes objects and assigns correct indices of the buffer index that each json object needs to track.
+// : indicates key-value pair, so it should mark a string at the location of colon and threads work left to parse
+// { go into new json scope (start index of json)
+// [ go into new list scope (start index of list)
+// } go out of current json scope (end index of json)
+// ] go out of current list scope (end index of list)
+// , add new item to list (no transfer of index, use to parse index)
+void initialize_buffer_connections() {
+    // flags and stacks for nested object management
+    // flag = current scope, stack = saved scope 
+    
+
+
+}
+
+
 //     stack<task*> task_stack;
 //     stack<bool> inList_stack;
 //     stack<vector<json_data>*> current_list_stack;
@@ -196,6 +213,8 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
 //         }
 //     }  
 // }
+
+
 
 
 int main() {
