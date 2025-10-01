@@ -7,7 +7,7 @@ using namespace json;
 using namespace std;
 using namespace device_utils;
 
-#define FINAL_VECTOR_SIZE 32768
+#define FINAL_VECTOR_SIZE 100000
 #define DEFAULT_VECTOR_SIZE 64
 #define CHAR_PER_THREAD 4096
 #define NUM_PER_BLOCK 256
@@ -26,60 +26,6 @@ namespace json {
     void task::setObject(json_object* o) {
         obj = o;
     }
-
-    // debug purpose
-    // std::ostream& operator<< (std::ostream& stream, const json_object& json);
-    // std::ostream& operator<< (std::ostream& stream, const json_data p) {
-    //     switch(p.type) {
-    //         case(INTEGER): {
-    //             int* address = static_cast<int*>(p.value);
-    //             stream << *address;
-    //             break;
-    //         }
-    //         case(DOUBLE): {
-    //             stream << *(static_cast<double*>(p.value));
-    //             break;
-    //         }
-    //         case(STRING): {
-    //             stream << *(static_cast<std::string*>(p.value));
-    //             break;
-    //         }
-    //         case(BOOLEAN): {
-    //             bool val = *(static_cast<bool*>(p.value));
-    //             stream << (val ? "true" : "false"); 
-    //             break;
-    //         }
-    //         case(JSON): {
-    //             stream << *(static_cast<json_object*>(p.value));
-    //             break;
-    //         }
-    //         case(LIST): {
-    //             auto vec = static_cast<std::vector<json_data>*>(p.value);
-    //             stream << "[";
-    //             for (size_t i = 0; i < vec->size(); ++i) {
-    //                 if (i > 0) stream << ", ";
-    //                 stream << (*vec)[i];
-    //             }
-    //             stream << "]";
-    //             break;
-    //         }
-    //     }
-    //     return stream;
-    // }
-    // std::ostream& operator<< (std::ostream& stream, const json_object& json) {
-    //     stream << "{";
-    //     bool first = true;
-    //     for (const auto& pair : json.data) {
-    //         if (!first) {
-    //             stream << ", ";
-    //         }
-    //         stream << pair.first << ": ";
-    //         stream << pair.second;
-    //         first = false;
-    //     }
-    //     stream << "}";
-    //     return stream;
-    // }
 
     void addObject(json_object& json, string_buffer& strbuf, json_buffer& jsonbuf, list_buffer& listbuf, const json_data data) {
         if (json.size >= 16) return;
@@ -110,10 +56,8 @@ namespace json {
     }
 }
 
-__global__ void get_sorted_structural_tokens(const char* json_content, StructuralToken* tokens) {
+__global__ void get_sorted_structural_tokens(const char* json_content, StructuralToken* tokens, int* tokens_size, const size_t& json_size) {
     size_t vector_capacity = (threadIdx.x == 0) ? FINAL_VECTOR_SIZE : DEFAULT_VECTOR_SIZE;
-
-    // allocate token_vector on device heap so other threads can dereference its pointer
     device_vector<StructuralToken>* token_vector = new device_vector<StructuralToken>(vector_capacity);
 
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -154,11 +98,11 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
                 break;
         }
     }
+    __syncthreads();
 
     __shared__ device_vector<StructuralToken>* vector_array[NUM_PER_BLOCK];
     vector_array[threadIdx.x] = token_vector;
-   
-    __syncthreads();
+
     for (int step = 1; step < blockDim.x; step *= 2) {
         if (threadIdx.x % (2 * step) == 0) {
             vector_array[threadIdx.x]->join(vector_array[threadIdx.x + step]);
@@ -166,16 +110,23 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
         __syncthreads();
     }
 
-    if (threadIdx.x == 0) {
-        int n = vector_array[0]->size();
-        for (int i = 0; i < n; i++) {
+
+    if (threadIdx.x < 1) {
+        *tokens_size = token_vector->size();
+        printf("token size: %d \n", *tokens_size);
+        for (int i = 0; i < *tokens_size; i++) {
+            if (i > FINAL_VECTOR_SIZE) {
+                printf("result needs to be bigger than %d \n", FINAL_VECTOR_SIZE);
+                break;
+            }
             StructuralToken st = vector_array[0]->get(i);
-            // printf("location :%d, type: %d \n", st.location, st.t);
-            // write into output buffer
             tokens[i] = st;
         }
-
     }
+
+    __syncthreads();
+    delete token_vector;
+    return;
 }
 
 //     stack<task*> task_stack;
@@ -269,13 +220,37 @@ int main() {
     cudaMalloc((void**) &d_sorted_tokens, sizeof(StructuralToken) * FINAL_VECTOR_SIZE);
     cudaMemcpy(d_json_content, json_content.data(), json_size, cudaMemcpyHostToDevice);
 
-    int num_block = (json_size + NUM_PER_BLOCK * CHAR_PER_THREAD) / ((NUM_PER_BLOCK) * (CHAR_PER_THREAD));
-    get_sorted_structural_tokens<<<num_block, NUM_PER_BLOCK>>> (d_json_content, d_sorted_tokens);
+    int* token_count = (int*) malloc(sizeof(int));
+    *token_count = 0;
+    int* d_token_count;
+    cudaMalloc((void**)&d_token_count, sizeof(int));
+    // Initialize the counter on the device to 0
+    cudaMemset(d_token_count, 0, sizeof(int)); 
+
+    //int num_block = (json_size + NUM_PER_BLOCK * CHAR_PER_THREAD) / ((NUM_PER_BLOCK) * (CHAR_PER_THREAD));
+    int num_block = 1;
+    get_sorted_structural_tokens<<<num_block, NUM_PER_BLOCK>>> (d_json_content, d_sorted_tokens, d_token_count, json_size);
     cudaDeviceSynchronize();
 
+    cudaMemcpy(token_count, d_token_count, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(sorted_tokens, d_sorted_tokens, sizeof(StructuralToken) * FINAL_VECTOR_SIZE, cudaMemcpyDeviceToHost);
-    for (int i = 0; i < FINAL_VECTOR_SIZE; i++) {
-        cout << sorted_tokens[i].t << endl;
+
+    // Now, *token_count on the host has the correct value.
+    cout << "Kernel found " << *token_count << " tokens." << endl;
+    
+    // 3. Now you can safely access the results.
+    cout << "Displaying first 8 tokens:" << endl;
+    for (int i = 0; i < *token_count && i < 8; i++) {
+        // Assuming your StructuralToken `t` is an enum or int you want to see
+        cout << "Token type: " << sorted_tokens[i].t << " at location: " << sorted_tokens[i].location << endl;
+    }
+
+    cout << "Total size: " << *token_count << endl;
+
+    // check for kernel/device errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "CUDA error: " << cudaGetErrorString(err) << std::endl;
     }
 
 
