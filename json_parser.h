@@ -111,6 +111,23 @@ namespace json {
         int location;
         tokenType t;
     };
+
+    // ostream operator overloads so enums/structs print readable names during debug.
+    inline std::ostream& operator<<(std::ostream& os, const tokenType& tt) {
+        switch (tt) {
+            case OPEN_BRACE:   return os << "OPEN_BRACE";
+            case CLOSE_BRACE:  return os << "CLOSE_BRACE";
+            case OPEN_BRACKET: return os << "OPEN_BRACKET";
+            case CLOSE_BRACKET: return os << "CLOSE_BRACKET";
+            case COLON:        return os << "COLON";
+            case COMMA:        return os << "COMMA";
+            default:           return os << "UNKNOWN_TOKEN";
+        }
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const StructuralToken& st) {
+        return os << "StructuralToken(type=" << st.t << ", location=" << st.location << ")";
+    }
 }
 
 namespace device_utils {

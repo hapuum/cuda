@@ -138,8 +138,14 @@ typedef enum {
     JSON_WAITING_INPUT
 } token_parser_state;
 
-
-
+inline std::ostream& operator<<(std::ostream& os, const token_parser_state& s) {
+    switch (s) {
+        case PROCESSING_JSON:     return os << "PROCESSING_JSON";
+        case PROCESSING_LIST:     return os << "PROCESSING_LIST";
+        case JSON_WAITING_INPUT:  return os << "JSON_WAITING_INPUT";
+        default:                  return os << "UNKNOWN_STATE";
+    }
+}
 
 // initializes objects and assigns correct indices of the buffer index that each json object needs to track.
 // : indicates key-value pair, so it should mark a string at the location of colon and threads work left to parse
@@ -152,9 +158,9 @@ void initialize_buffer_connections
 (
  StructuralToken* const tokens
 ,const int& tokens_size
-,json::string_buffer strbuf
-,json::list_buffer listbuf
-,json::json_buffer jsonbuf
+,json::string_buffer& strbuf
+,json::list_buffer& listbuf
+,json::json_buffer& jsonbuf
 ) 
 {
     if (tokens_size <= 0) return;
@@ -184,6 +190,8 @@ void initialize_buffer_connections
     // iterate through tokens and process in FSM style code
     for (int i = 1; i < tokens_size; i++) {
         StructuralToken tok = tokens[i];
+        cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t;
+        cout << ", state = " << state << endl;
         switch (state) {
             case PROCESSING_JSON: {
                 if (tok.t != COLON) {
@@ -204,6 +212,13 @@ void initialize_buffer_connections
                         // CONNECT NEW JSON SCOPE AS CURRENT SCOPE'S CHILD
                         break;
                     case CLOSE_BRACE:  // this json object is done, close its scope and restore previous scope
+                        if (state_stack.empty()) {
+                                // closed the root JSON - parsing finished
+                                cout << "closed root JSON, finishing parse loop" << endl;
+                                // exit loop cleanly
+                                i = tokens_size;
+                                break;
+                        }    
                         state = state_stack.top();
                         state_stack.pop(); 
                         local_index = local_index_stack.top();
@@ -226,7 +241,7 @@ void initialize_buffer_connections
                         state = PROCESSING_JSON;
                         break;
                     default:
-                        printf("error: invalid structural token type");
+                        printf("error: invalid structural token type: %d\n", tok.t);
                         break;
                 }
                 break;
@@ -241,6 +256,7 @@ void initialize_buffer_connections
                         current_json_index_stack.push(current_json_index);
                         current_json_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
                         // link new children to current object before pushing
+                        break;
                     case OPEN_BRACKET: 
                         state_stack.push(state);
                         state = PROCESSING_LIST;
@@ -249,105 +265,37 @@ void initialize_buffer_connections
                         current_list_index_stack.push(current_list_index);
                         current_list_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
                         // link new children to current object before pushing
+                        break;
                     case CLOSE_BRACKET:
+                        if (state_stack.empty()) {
+                            // closed the root list - finish parsing
+                            cout << "closed root LIST, finishing parse loop" << endl;
+                            i = tokens_size;
+                            break;
+                        }
                         state = state_stack.top();
                         state_stack.pop(); 
                         local_index = local_index_stack.top();
                         local_index_stack.pop();
                         current_list_index = current_list_index_stack.top();
                         current_list_index_stack.pop();
+                        break;
                     case COMMA: // get next element
                         local_index++;
                         state = PROCESSING_LIST;
                         break;
                     default:
-                        printf("error: invalid structural token type");
+                        printf("error: invalid structural token type: %d at index %d \n", tok.t, tok.location);
                         break;
                 }
-            }
                 break;
+            }
             default:
                 printf("error: invalid state");
                 break;
         }
     }
-
-
-
-
 }
-
-
-//     stack<task*> task_stack;
-//     stack<bool> inList_stack;
-//     stack<vector<json_data>*> current_list_stack;
-//     stack<int> gpu_index_stack;
-//     bool inString = false;
-//     bool inList = false;
-//     int start = json_content.find_first_of('{');
-//     json_object* current_json =  new json_object();
-//     int current_gpu_index = 0;
-//     task* current_task = new task(start, 0, current_json);
-//     string current_string;
-//     vector<json_data>* current_list;
-//     size_t json_size = json_content.size();
-//     for (int i = start; i < json_size; i++) {
-//         char c = json_content[i];
-//         if (inString && c != '"') current_string = current_string + c;
-//         switch (c) {
-//             case '{' : {  // push in current task to save it, start working on new one
-//                 if (inString) break;
-//                 task_stack.push(current_task);
-//                 json_object* new_json = new json_object();
-//                 if (!inList) {
-//                     current_json->addObject(current_string, new_json);
-//                 }
-//                 else {  // list stores payloads, instead of pair<string,payload>
-//                     json_data p = json_data(new_json, JSON);
-//                     current_list->push_back(p);
-//                 }
-//                 current_json = new_json;
-//                 current_task = new task(i, 0, current_json);
-//                 break;
-//             }
-//             case '}' : {  // finish and dispatch current task, go back to latest task
-//                 if (inString) break;
-//                 current_task->end = i;
-//                 task_dispatchable.push_back(current_task);
-//                 current_task = task_stack.top();
-//                 current_json = current_task->obj;
-//                 task_stack.pop();
-//                 break;
-//             }
-//             case '"' : {
-//                 inString = !inString;
-//                 if (inString) current_string = "";  // entering new string
-//                 break;
-//             }
-//             case '[' : {
-//                 inList_stack.push(inList);
-//                 inList = true;
-//                 current_list_stack.push(current_list);
-//                 current_list = new vector<json_data>();
-//                 current_json->addObject(current_string, current_list);
-//                 cout << current_string << endl;
-//                 break;
-//             }
-//             case ']' : {
-//                 inList = inList_stack.top();
-//                 inList_stack.pop();
-//                 current_list = current_list_stack.top();
-//                 current_list_stack.pop();
-//                 break;
-//             }
-//             default:
-//                 break;
-//         }
-//     }  
-// }
-
-
-
 
 int main() {
     bool testing = false;
@@ -404,16 +352,14 @@ int main() {
         std::cerr << "CUDA error: " << cudaGetErrorString(err) << std::endl;
     }
 
-
-    cout << "JSON OBJECT SIZE :" << sizeof(json_object) << endl;
-    cout << "JSON BUFFER SIZE :" << sizeof(json_buffer) << endl;
-    cout << "STRING BUFFER SIZE:" << sizeof(string_buffer) << endl;
-    cout << "LIST BUFFER SIZE:" << sizeof(list_buffer) << endl;
-
     string_buffer strbuf;
     list_buffer listbuf;
     json_buffer jsonbuf;
-    json_object j;
+
+    strbuf.size = 0;
+    listbuf.size = 0;
+    jsonbuf.size = 0;
+
 
     initialize_buffer_connections(sorted_tokens, *token_count, strbuf, listbuf, jsonbuf);
 
