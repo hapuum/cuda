@@ -130,6 +130,17 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
     return;
 }
 
+
+// helper state enumeration to approach token processing as if it was an FSM
+typedef enum {
+    PROCESSING_JSON,
+    PROCESSING_LIST,
+    JSON_WAITING_INPUT
+} token_parser_state;
+
+
+
+
 // initializes objects and assigns correct indices of the buffer index that each json object needs to track.
 // : indicates key-value pair, so it should mark a string at the location of colon and threads work left to parse
 // { go into new json scope (start index of json)
@@ -137,10 +148,131 @@ __global__ void get_sorted_structural_tokens(const char* json_content, Structura
 // } go out of current json scope (end index of json)
 // ] go out of current list scope (end index of list)
 // , add new item to list (no transfer of index, use to parse index)
-void initialize_buffer_connections() {
+void initialize_buffer_connections
+(
+ StructuralToken* const tokens
+,const int& tokens_size
+,json::string_buffer strbuf
+,json::list_buffer listbuf
+,json::json_buffer jsonbuf
+) 
+{
+    if (tokens_size <= 0) return;
+
     // flags and stacks for nested object management
     // flag = current scope, stack = saved scope 
-    
+
+    stack<token_parser_state> state_stack;
+    token_parser_state state;
+
+    int local_index = 0;  // index within the current json / list scope
+    stack<int> local_index_stack;
+
+    int current_json_index = 0;  // index of current json object in global buffer
+    stack<int> current_json_index_stack;
+
+    int current_list_index = 0;  // index of current list object in global buffer
+    stack<int> current_list_index_stack;
+
+
+    if (tokens[0].t == OPEN_BRACE) state = PROCESSING_JSON;
+    else if (tokens[0].t == OPEN_BRACKET) state = PROCESSING_LIST;
+    else {
+        printf("starting token invalid -- files need review before preceeding");
+        return;
+    } 
+    // iterate through tokens and process in FSM style code
+    for (int i = 1; i < tokens_size; i++) {
+        StructuralToken tok = tokens[i];
+        switch (state) {
+            case PROCESSING_JSON: {
+                if (tok.t != COLON) {
+                    printf("error: processing json state expects a colon");
+                }
+                state = JSON_WAITING_INPUT;
+                break;
+            }
+            case JSON_WAITING_INPUT: {
+                switch (tok.t) {
+                    case OPEN_BRACE:  // new json scope
+                        state_stack.push(state);
+                        state = PROCESSING_JSON;
+                        local_index_stack.push(local_index);
+                        local_index = 0;
+                        current_json_index_stack.push(current_json_index);
+                        current_json_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
+                        // CONNECT NEW JSON SCOPE AS CURRENT SCOPE'S CHILD
+                        break;
+                    case CLOSE_BRACE:  // this json object is done, close its scope and restore previous scope
+                        state = state_stack.top();
+                        state_stack.pop(); 
+                        local_index = local_index_stack.top();
+                        local_index_stack.pop();
+                        current_json_index = current_json_index_stack.top();
+                        current_json_index_stack.pop();
+                        break;
+                    case OPEN_BRACKET: // new list scope
+                        state_stack.push(state);
+                        state = PROCESSING_LIST;
+                        local_index_stack.push(local_index);
+                        local_index = 0;
+                        current_list_index_stack.push(current_list_index);
+                        current_list_index = 0;  // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
+                        // CONNECT NEW LIST SCOPE AS CURRENT SCOPE'S CHILD
+                        break;
+                    case COMMA: // either primitive type or parsing this after restoring scope after finished list/json.
+                                // increase local index and continue going
+                        local_index++;
+                        state = PROCESSING_JSON;
+                        break;
+                    default:
+                        printf("error: invalid structural token type");
+                        break;
+                }
+                break;
+            }
+            case PROCESSING_LIST: {
+                switch (tok.t) {
+                    case OPEN_BRACE:
+                        state_stack.push(state);
+                        state = PROCESSING_JSON;
+                        local_index_stack.push(local_index);
+                        local_index = 0;
+                        current_json_index_stack.push(current_json_index);
+                        current_json_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
+                        // link new children to current object before pushing
+                    case OPEN_BRACKET: 
+                        state_stack.push(state);
+                        state = PROCESSING_LIST;
+                        local_index_stack.push(local_index);
+                        local_index = 0;
+                        current_list_index_stack.push(current_list_index);
+                        current_list_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
+                        // link new children to current object before pushing
+                    case CLOSE_BRACKET:
+                        state = state_stack.top();
+                        state_stack.pop(); 
+                        local_index = local_index_stack.top();
+                        local_index_stack.pop();
+                        current_list_index = current_list_index_stack.top();
+                        current_list_index_stack.pop();
+                    case COMMA: // get next element
+                        local_index++;
+                        state = PROCESSING_LIST;
+                        break;
+                    default:
+                        printf("error: invalid structural token type");
+                        break;
+                }
+            }
+                break;
+            default:
+                printf("error: invalid state");
+                break;
+        }
+    }
+
+
 
 
 }
