@@ -405,8 +405,19 @@ int main() {
     }
 
 
+    cout << "JSON OBJECT SIZE :" << sizeof(json_object) << endl;
+    cout << "JSON BUFFER SIZE :" << sizeof(json_buffer) << endl;
+    cout << "STRING BUFFER SIZE:" << sizeof(string_buffer) << endl;
+    cout << "LIST BUFFER SIZE:" << sizeof(list_buffer) << endl;
+
+    string_buffer strbuf;
+    list_buffer listbuf;
+    json_buffer jsonbuf;
+    json_object j;
+
+    initialize_buffer_connections(sorted_tokens, *token_count, strbuf, listbuf, jsonbuf);
 
     // now remap task_dispatchable to nice array structure where each thread can access
     // might need to implement device_compatible_vector and device_compatible_stack for the actual kernel code
-    
+    return EXIT_SUCCESS;
 }

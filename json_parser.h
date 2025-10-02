@@ -65,7 +65,7 @@ namespace json {
     };
     class list_buffer {
         public:
-        json_object data[MAX_LIST_LENGTH];
+        json_data data[MAX_LIST_LENGTH];
         int list_starting_index[MAX_LISTS];
         int start[MAX_LISTS];
         int end[MAX_LISTS];
