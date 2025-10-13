@@ -249,6 +249,8 @@ void initialize_buffer_connections
                         break;
                     }
                     jsonbuf.end[current_json_index] = tok.location;
+
+                    // some weird bug here that makes jsonbuf.size explode??
                     state = state_stack.top();
                     state_stack.pop(); 
                     local_index = local_index_stack.top();
