@@ -1,5 +1,5 @@
 make:
-	nvcc -o cuda_program.o cuda/$(file).cu
+	nvcc -o cuda_program.o json_parser.cu
 	./cuda_program.o
 
 git:

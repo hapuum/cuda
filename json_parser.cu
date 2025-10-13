@@ -27,7 +27,7 @@ namespace json {
         obj = o;
     }
 
-    void addObject(json_object& json, string_buffer& strbuf, json_buffer& jsonbuf, list_buffer& listbuf, const json_data data) {
+    void addObject(json_object& json, string_buffer& strbuf, json_buffer& jsonbuf, list_buffer& listbuf, const json_data data, const int local_index) {
         if (json.size >= 16) return;
         json_type t = data.type;
         json.child_json[json.size].type = t;
@@ -181,117 +181,143 @@ void initialize_buffer_connections
     stack<int> current_list_index_stack;
 
 
+    // add root object management for jsonbuf/strbuf.
+    // jsonbuf[0] should be occupied by root object most times
     if (tokens[0].t == OPEN_BRACE) state = PROCESSING_JSON;
     else if (tokens[0].t == OPEN_BRACKET) state = PROCESSING_LIST;
     else {
         printf("starting token invalid -- files need review before preceeding");
         return;
     } 
-    // iterate through tokens and process in FSM style code
-    for (int i = 1; i < tokens_size; i++) {
+    // iterate through tokens and process using a token-centric switch.
+    //for (int i = 1; i < tokens_size; i++) {
+    for (int i = 1; i < 500; i++) {
         StructuralToken tok = tokens[i];
         cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t;
-        cout << ", state = " << state << endl;
-        switch (state) {
-            case PROCESSING_JSON: {
-                if (tok.t != COLON) {
-                    printf("error: processing json state expects a colon");
-                }
-                state = JSON_WAITING_INPUT;
-                break;
-            }
-            case JSON_WAITING_INPUT: {
-                switch (tok.t) {
-                    case OPEN_BRACE:  // new json scope
-                        state_stack.push(state);
-                        state = PROCESSING_JSON;
-                        local_index_stack.push(local_index);
-                        local_index = 0;
-                        current_json_index_stack.push(current_json_index);
-                        current_json_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
-                        // CONNECT NEW JSON SCOPE AS CURRENT SCOPE'S CHILD
-                        break;
-                    case CLOSE_BRACE:  // this json object is done, close its scope and restore previous scope
-                        if (state_stack.empty()) {
-                                // closed the root JSON - parsing finished
-                                cout << "closed root JSON, finishing parse loop" << endl;
-                                // exit loop cleanly
-                                i = tokens_size;
-                                break;
-                        }    
-                        state = state_stack.top();
-                        state_stack.pop(); 
-                        local_index = local_index_stack.top();
-                        local_index_stack.pop();
-                        current_json_index = current_json_index_stack.top();
-                        current_json_index_stack.pop();
-                        break;
-                    case OPEN_BRACKET: // new list scope
-                        state_stack.push(state);
-                        state = PROCESSING_LIST;
-                        local_index_stack.push(local_index);
-                        local_index = 0;
-                        current_list_index_stack.push(current_list_index);
-                        current_list_index = 0;  // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
-                        // CONNECT NEW LIST SCOPE AS CURRENT SCOPE'S CHILD
-                        break;
-                    case COMMA: // either primitive type or parsing this after restoring scope after finished list/json.
-                                // increase local index and continue going
-                        local_index++;
-                        state = PROCESSING_JSON;
-                        break;
-                    default:
-                        printf("error: invalid structural token type: %d\n", tok.t);
-                        break;
+        cout << ", state = " << state << ", jsonbuf size: " << jsonbuf.size << endl;
+
+        switch (tok.t) {
+            case COLON:
+                // COLON only meaningful when processing a JSON object (expecting a key:value separator)
+                if (state != PROCESSING_JSON) {
+                    printf("error: unexpected COLON when not processing JSON at location %d\n", tok.location);
+                } else {
+                    state = JSON_WAITING_INPUT;
                 }
                 break;
-            }
-            case PROCESSING_LIST: {
-                switch (tok.t) {
-                    case OPEN_BRACE:
-                        state_stack.push(state);
-                        state = PROCESSING_JSON;
-                        local_index_stack.push(local_index);
-                        local_index = 0;
-                        current_json_index_stack.push(current_json_index);
-                        current_json_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
-                        // link new children to current object before pushing
+
+            case OPEN_BRACE:
+                // start a new JSON scope: valid when we were waiting for input after a colon
+                // or when we're inside a list (an object as a list element)
+                json_data new_json_scope;
+                new_json_scope.type = JSON;
+                new_json_scope.val.json_buffer_index = jsonbuf.size;
+
+                if (state == JSON_WAITING_INPUT) {
+                    jsonbuf.data[current_json_index].child_json[local_index] = new_json_scope;
+                    jsonbuf.start[jsonbuf.size] = tok.location;
+
+                    printf("connected current json at %d to new json at %d\n", current_json_index, jsonbuf.size);
+                }
+
+                if (state == PROCESSING_LIST) {
+                    listbuf.data[listbuf.size] =  new_json_scope;
+                    printf("stored new json at %d in listbuf[%d]\n", jsonbuf.size, listbuf.size);
+                    listbuf.size++;
+                }
+                
+                if (state == JSON_WAITING_INPUT || state == PROCESSING_LIST) {
+                    state_stack.push(state);
+                    state = PROCESSING_JSON;
+                    local_index_stack.push(local_index);
+                    local_index = 0;
+                    current_json_index_stack.push(current_json_index);
+                    current_json_index = jsonbuf.size++;
+                } else {
+                    printf("error: OPEN_BRACE in invalid state %d at location %d\n", state, tok.location);
+                }
+
+                break;
+
+            case CLOSE_BRACE:
+                // close current JSON scope; only meaningful if we were waiting for input in a JSON or inside JSON
+                if (state == JSON_WAITING_INPUT) {
+                    if (state_stack.empty()) {
+                        // closed the root JSON - parsing finished
+                        cout << "closed root JSON, finishing parse loop" << endl;
+                        i = tokens_size;
                         break;
-                    case OPEN_BRACKET: 
-                        state_stack.push(state);
-                        state = PROCESSING_LIST;
-                        local_index_stack.push(local_index);
-                        local_index = 0;
-                        current_list_index_stack.push(current_list_index);
-                        current_list_index = 0; // THIS SHOULD BE IN CORRECT LOCATION OF THE CORRECT BUFFER, NOT 0
-                        // link new children to current object before pushing
-                        break;
-                    case CLOSE_BRACKET:
-                        if (state_stack.empty()) {
-                            // closed the root list - finish parsing
-                            cout << "closed root LIST, finishing parse loop" << endl;
-                            i = tokens_size;
-                            break;
-                        }
-                        state = state_stack.top();
-                        state_stack.pop(); 
-                        local_index = local_index_stack.top();
-                        local_index_stack.pop();
-                        current_list_index = current_list_index_stack.top();
-                        current_list_index_stack.pop();
-                        break;
-                    case COMMA: // get next element
-                        local_index++;
-                        state = PROCESSING_LIST;
-                        break;
-                    default:
-                        printf("error: invalid structural token type: %d at index %d \n", tok.t, tok.location);
-                        break;
+                    }
+                    jsonbuf.end[current_json_index] = tok.location;
+                    state = state_stack.top();
+                    state_stack.pop(); 
+                    local_index = local_index_stack.top();
+                    local_index_stack.pop();
+                    current_json_index = current_json_index_stack.top();
+                    current_json_index_stack.pop();
+                    printf("returning to outer scope, new current json index: %d\n", current_json_index);
+                } else {
+                    printf("error: unexpected CLOSE_BRACE in state %d at location %d\n", state, tok.location);
                 }
                 break;
-            }
+
+            case OPEN_BRACKET:  // list in a list is not yet supported
+                json_data new_list_scope;
+                new_list_scope.type = LIST;
+                new_list_scope.val.list_buffer_index = listbuf.size;
+                if (state == JSON_WAITING_INPUT) {
+                    
+                    jsonbuf.data[current_json_index].child_json[local_index] = new_list_scope;
+                    listbuf.start[listbuf.size] = tok.location;
+                    state_stack.push(state);
+                    state = PROCESSING_LIST;
+                    local_index_stack.push(local_index);
+                    local_index = 0;
+                    current_list_index_stack.push(current_list_index);
+                    current_list_index = listbuf.size++;
+
+                } else {
+                    printf("error: OPEN_BRACKET in invalid state %d at location %d\n", state, tok.location);
+                }
+                break;
+
+            case CLOSE_BRACKET:
+                // close current list scope
+                if (state == PROCESSING_LIST) {
+                    if (state_stack.empty()) {
+                        // closed the root list - finish parsing
+                        cout << "closed root LIST, finishing parse loop" << endl;
+                        i = tokens_size;
+                        break;
+                    }
+
+                    listbuf.end[current_list_index] = tok.location;
+                    state = state_stack.top();
+                    state_stack.pop(); 
+                    local_index = local_index_stack.top();
+                    local_index_stack.pop();
+                    current_list_index = current_list_index_stack.top();
+                    current_list_index_stack.pop();
+                } else {
+                    printf("error: unexpected CLOSE_BRACKET in state %d at location %d\n", state, tok.location);
+                }
+                break;
+
+            case COMMA:
+                // comma separates elements: valid when in a list or after finishing a value in a JSON
+                if (state == JSON_WAITING_INPUT) {
+                    local_index++;
+                    state = PROCESSING_JSON; // expect next key in the object
+                } else if (state == PROCESSING_LIST) {
+                    local_index++;
+                    // remain in PROCESSING_LIST
+                } else {
+                    printf("error: unexpected COMMA in state %d at location %d\n", state, tok.location);
+                }
+                break;
+
             default:
-                printf("error: invalid state");
+                printf("error: invalid structural token type: %d at index %d \n", tok.t, tok.location);
                 break;
         }
     }
@@ -362,6 +388,11 @@ int main() {
 
 
     initialize_buffer_connections(sorted_tokens, *token_count, strbuf, listbuf, jsonbuf);
+
+
+
+
+
 
     // now remap task_dispatchable to nice array structure where each thread can access
     // might need to implement device_compatible_vector and device_compatible_stack for the actual kernel code
