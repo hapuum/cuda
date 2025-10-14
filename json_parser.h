@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#define MAX_JSONS 8192
 #define MAX_CHILDREN_PER_JSON 16
 #define MAX_STRINGS 16384
 #define MAX_STRING_LENGTH 32
@@ -41,8 +42,8 @@ namespace json {
 
     class json_object {
         public:
-        int key_string_indices[16];
-        json_data child_json[16];
+        int key_string_indices[MAX_CHILDREN_PER_JSON];
+        json_data child_json[MAX_CHILDREN_PER_JSON];
         int size;
     };
 
@@ -58,9 +59,9 @@ namespace json {
     };
     class json_buffer {
         public:
-        json_object data[MAX_CHILDREN_PER_JSON];
-        int start[MAX_CHILDREN_PER_JSON];
-        int end[MAX_CHILDREN_PER_JSON];
+        json_object data[MAX_JSONS];
+        int start[MAX_JSONS];
+        int end[MAX_JSONS];
         int size;
     };
     class list_buffer {

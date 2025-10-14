@@ -147,6 +147,7 @@ inline std::ostream& operator<<(std::ostream& os, const token_parser_state& s) {
     }
 }
 
+
 // initializes objects and assigns correct indices of the buffer index that each json object needs to track.
 // : indicates key-value pair, so it should mark a string at the location of colon and threads work left to parse
 // { go into new json scope (start index of json)
@@ -190,11 +191,11 @@ void initialize_buffer_connections
         return;
     } 
     // iterate through tokens and process using a token-centric switch.
-    //for (int i = 1; i < tokens_size; i++) {
-    for (int i = 1; i < 500; i++) {
+    for (int i = 1; i < tokens_size; i++) {
+    //for (int i = 1; i < 500; i++) {
         StructuralToken tok = tokens[i];
-        cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t;
-        cout << ", state = " << state << ", jsonbuf size: " << jsonbuf.size << endl;
+        //cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t;
+        //cout << ", state = " << state << ", jsonbuf size: " << jsonbuf.size << ", current json index:" << current_json_index << ", current list index:" << current_list_index << ", local index: " << local_index <<  endl;
 
         switch (tok.t) {
             case COLON:
@@ -234,7 +235,7 @@ void initialize_buffer_connections
                     current_json_index_stack.push(current_json_index);
                     current_json_index = jsonbuf.size++;
                 } else {
-                    printf("error: OPEN_BRACE in invalid state %d at location %d\n", state, tok.location);
+                    cout << "error: OPEN_BRACE in invalid state " << state << "at location: " << tok.location << endl;
                 }
 
                 break;
@@ -248,9 +249,10 @@ void initialize_buffer_connections
                         i = tokens_size;
                         break;
                     }
+                    // WHY IS IT NOT CAUSING SEGFAULT???? HELLO???
+                    // when i => 16, jsonbuf.end[16] is illegal, overflows and overwrites the memory next to it which is size
+                    // jsonbuf.end[] is incorrectly configured? 
                     jsonbuf.end[current_json_index] = tok.location;
-
-                    // some weird bug here that makes jsonbuf.size explode??
                     state = state_stack.top();
                     state_stack.pop(); 
                     local_index = local_index_stack.top();
@@ -259,7 +261,7 @@ void initialize_buffer_connections
                     current_json_index_stack.pop();
                     printf("returning to outer scope, new current json index: %d\n", current_json_index);
                 } else {
-                    printf("error: unexpected CLOSE_BRACE in state %d at location %d\n", state, tok.location);
+                    cout << "error: CLOSE_BRACE in invalid state " << state << "at location: " << tok.location << endl;
                 }
                 break;
 
@@ -279,7 +281,7 @@ void initialize_buffer_connections
                     current_list_index = listbuf.size++;
 
                 } else {
-                    printf("error: OPEN_BRACKET in invalid state %d at location %d\n", state, tok.location);
+                    cout << "error: OPEN_BRACKET in invalid state " << state << "at location: " << tok.location << endl;
                 }
                 break;
 
@@ -301,7 +303,7 @@ void initialize_buffer_connections
                     current_list_index = current_list_index_stack.top();
                     current_list_index_stack.pop();
                 } else {
-                    printf("error: unexpected CLOSE_BRACKET in state %d at location %d\n", state, tok.location);
+                    cout << "error: CLOSE BRACKET in invalid state " << state << " at location: " << tok.location << endl;
                 }
                 break;
 
@@ -314,7 +316,7 @@ void initialize_buffer_connections
                     local_index++;
                     // remain in PROCESSING_LIST
                 } else {
-                    printf("error: unexpected COMMA in state %d at location %d\n", state, tok.location);
+                    cout << "error: COMMA in invalid state " << state << " at location: " << tok.location << endl;
                 }
                 break;
 
