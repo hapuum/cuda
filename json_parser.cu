@@ -184,8 +184,14 @@ void initialize_buffer_connections
 
     // add root object management for jsonbuf/strbuf.
     // jsonbuf[0] should be occupied by root object most times
-    if (tokens[0].t == OPEN_BRACE) state = PROCESSING_JSON;
-    else if (tokens[0].t == OPEN_BRACKET) state = PROCESSING_LIST;
+    if (tokens[0].t == OPEN_BRACE) {
+        state = PROCESSING_JSON;
+        jsonbuf.size++;
+    }
+    else if (tokens[0].t == OPEN_BRACKET) {
+        state = PROCESSING_LIST;
+        listbuf.size++;
+    }
     else {
         printf("starting token invalid -- files need review before preceeding");
         return;
@@ -194,8 +200,8 @@ void initialize_buffer_connections
     for (int i = 1; i < tokens_size; i++) {
     //for (int i = 1; i < 500; i++) {
         StructuralToken tok = tokens[i];
-        //cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t;
-        //cout << ", state = " << state << ", jsonbuf size: " << jsonbuf.size << ", current json index:" << current_json_index << ", current list index:" << current_list_index << ", local index: " << local_index <<  endl;
+        cout << "i = " << i << ", token location: " << tok.location << ", token type: " << tok.t << ", state: " << state << endl;
+        //cout << ", jsonbuf size: " << jsonbuf.size << ", current json index:" << current_json_index << ", current list index:" << current_list_index << ", local index: " << local_index <<  endl;
 
         switch (tok.t) {
             case COLON:
@@ -242,7 +248,7 @@ void initialize_buffer_connections
 
             case CLOSE_BRACE:
                 // close current JSON scope; only meaningful if we were waiting for input in a JSON or inside JSON
-                if (state == JSON_WAITING_INPUT) {
+                if (state == JSON_WAITING_INPUT || state == PROCESSING_JSON) {
                     if (state_stack.empty()) {
                         // closed the root JSON - parsing finished
                         cout << "closed root JSON, finishing parse loop" << endl;
@@ -278,8 +284,10 @@ void initialize_buffer_connections
                     local_index_stack.push(local_index);
                     local_index = 0;
                     current_list_index_stack.push(current_list_index);
-                    current_list_index = listbuf.size++;
+                    
+                    cout << "going into new list, list number: " << listbuf.num_lists++ << ", at index: " << listbuf.size << endl;
 
+                    current_list_index = listbuf.size++;
                 } else {
                     cout << "error: OPEN_BRACKET in invalid state " << state << "at location: " << tok.location << endl;
                 }
@@ -302,6 +310,8 @@ void initialize_buffer_connections
                     local_index_stack.pop();
                     current_list_index = current_list_index_stack.top();
                     current_list_index_stack.pop();
+
+                    cout << "returning to outer scope, new list index: " << current_list_index << endl;
                 } else {
                     cout << "error: CLOSE BRACKET in invalid state " << state << " at location: " << tok.location << endl;
                 }
@@ -325,6 +335,13 @@ void initialize_buffer_connections
                 break;
         }
     }
+}
+
+// debugging help function to see what json content is around index. prints 50 before and after the index
+void printStringAround(int index, const string json) {
+    cout << json.substr(index - 50, 100) << endl;
+
+    cout << "intended character: " << json[index] << endl;
 }
 
 int main() {
@@ -394,7 +411,8 @@ int main() {
     initialize_buffer_connections(sorted_tokens, *token_count, strbuf, listbuf, jsonbuf);
 
 
-
+    // NEED STRING ESCAPING!!!! half of the issues are comma in the string, and the other half is colon in string
+    printStringAround(26436, json_content);
 
 
 

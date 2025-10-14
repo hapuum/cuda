@@ -4,6 +4,7 @@ make:
 
 debug:
 	nvcc -G -g -O0 -lineinfo -o debug_program.o json_parser.cu
+	cuda-gdb ./debug_program.o
 
 git:
 	git add .

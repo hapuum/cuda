@@ -67,10 +67,10 @@ namespace json {
     class list_buffer {
         public:
         json_data data[MAX_LIST_LENGTH];
-        int list_starting_index[MAX_LISTS];
         int start[MAX_LISTS];
         int end[MAX_LISTS];
         int size;
+        int num_lists;
         // Tokens are perfectly fine to generate starting index of each list,
         // where other objects navigate into list_starting_index then use that to get where to start data
     };
